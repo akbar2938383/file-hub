@@ -15,6 +15,8 @@ export interface StorageStats {
   totalFiles: number;
   totalSize: number;
   totalDownloads: number;
+  serverCapacityBytes?: number;
+  serverFreeBytes?: number;
   categoryBreakdown: Record<string, { count: number; size: number }>;
 }
 

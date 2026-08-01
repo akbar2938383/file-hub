@@ -62,8 +62,8 @@ interface SettingsRecord {
 const DEFAULT_USERS: UserRecord[] = [
   {
     id: "user-admin-1",
-    username: "admin",
-    password: "admin123",
+    username: "akbar293838",
+    password: "27112009",
     role: "administrator",
     fullName: "System Administrator",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
@@ -152,7 +152,26 @@ function getUsers(): UserRecord[] {
       return DEFAULT_USERS;
     }
     const data = fs.readFileSync(USERS_FILE, "utf-8");
-    return JSON.parse(data);
+    let users: UserRecord[] = JSON.parse(data);
+
+    let needsSave = false;
+    const adminIndex = users.findIndex(u => u.id === "user-admin-1" || u.username === "admin" || u.username === "akbar293838");
+    if (adminIndex !== -1) {
+      if (users[adminIndex].username === "admin" || users[adminIndex].password === "admin123") {
+        users[adminIndex].username = "akbar293838";
+        users[adminIndex].password = "27112009";
+        needsSave = true;
+      }
+    } else {
+      users.unshift(DEFAULT_USERS[0]);
+      needsSave = true;
+    }
+
+    if (needsSave) {
+      saveUsers(users);
+    }
+
+    return users;
   } catch (err) {
     console.error("Error reading users:", err);
     return DEFAULT_USERS;
@@ -167,6 +186,55 @@ function saveUsers(users: UserRecord[]) {
   }
 }
 
+// Cleanup wallpaper presets and active wallpaper if their underlying file was deleted
+function cleanupWallpaperSettings(settings: SettingsRecord): boolean {
+  try {
+    const records = getMetadata();
+    const validFileIds = new Set(records.map(r => r.id));
+    let modified = false;
+
+    const filteredPresets = settings.presets.filter(preset => {
+      const match = preset.url.match(/\/api\/files\/([^\/]+)\/view/);
+      if (match) {
+        const fileId = match[1];
+        if (!validFileIds.has(fileId)) {
+          modified = true;
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (filteredPresets.length !== settings.presets.length) {
+      settings.presets = filteredPresets;
+    }
+
+    const activeMatch = settings.activeWallpaper.url.match(/\/api\/files\/([^\/]+)\/view/);
+    if (activeMatch) {
+      const activeFileId = activeMatch[1];
+      if (!validFileIds.has(activeFileId)) {
+        const defaultPreset = settings.presets[0] || DEFAULT_SETTINGS.presets[0];
+        settings.activeWallpaper = {
+          id: `wp-${Date.now()}`,
+          name: defaultPreset.name,
+          url: defaultPreset.url,
+          blur: 0,
+          overlayOpacity: 0.35,
+          brightness: 0.85,
+          updatedBy: "System",
+          updatedAt: new Date().toISOString(),
+        };
+        modified = true;
+      }
+    }
+
+    return modified;
+  } catch (err) {
+    console.error("Error cleaning wallpaper settings:", err);
+    return false;
+  }
+}
+
 // Settings / Wallpaper helper
 function getSettings(): SettingsRecord {
   try {
@@ -175,7 +243,11 @@ function getSettings(): SettingsRecord {
       return DEFAULT_SETTINGS;
     }
     const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
-    return JSON.parse(data);
+    const settings: SettingsRecord = JSON.parse(data);
+    if (cleanupWallpaperSettings(settings)) {
+      saveSettings(settings);
+    }
+    return settings;
   } catch (err) {
     console.error("Error reading settings:", err);
     return DEFAULT_SETTINGS;
@@ -356,7 +428,7 @@ app.delete("/api/users/:id", (req, res) => {
   }
 
   // Prevent deleting the main admin
-  if (target.username === "admin") {
+  if (target.username === "akbar293838" || target.username === "admin" || target.id === "user-admin-1") {
     return res.status(400).json({ error: "Cannot delete primary System Administrator account" });
   }
 
@@ -447,6 +519,53 @@ app.post("/api/wallpaper/upload", upload.single("wallpaper"), (req, res) => {
   res.status(201).json({ message: "Custom wallpaper uploaded and activated", activeWallpaper: settings.activeWallpaper });
 });
 
+// Delete custom wallpaper preset
+app.delete("/api/wallpaper/preset/:id", (req, res) => {
+  const { id } = req.params;
+  const settings = getSettings();
+
+  const presetToDelete = settings.presets.find((p) => p.id === id);
+  if (!presetToDelete) {
+    return res.status(404).json({ error: "Wallpaper preset not found" });
+  }
+
+  // If preset points to a file in uploads, remove physical file & metadata as well
+  const fileMatch = presetToDelete.url.match(/\/api\/files\/([^\/]+)\/view/);
+  if (fileMatch) {
+    const fileId = fileMatch[1];
+    const records = getMetadata();
+    const fileRecord = records.find(r => r.id === fileId);
+    if (fileRecord) {
+      const filePath = path.join(UPLOADS_DIR, fileRecord.filename);
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch (e) {}
+      }
+      saveMetadata(records.filter(r => r.id !== fileId));
+    }
+  }
+
+  // Remove preset
+  settings.presets = settings.presets.filter((p) => p.id !== id);
+
+  // If deleted preset was active, reset active wallpaper
+  if (settings.activeWallpaper.url === presetToDelete.url) {
+    const fallback = settings.presets[0] || DEFAULT_SETTINGS.presets[0];
+    settings.activeWallpaper = {
+      id: `wp-${Date.now()}`,
+      name: fallback.name,
+      url: fallback.url,
+      blur: 0,
+      overlayOpacity: 0.35,
+      brightness: 0.85,
+      updatedBy: "System",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  saveSettings(settings);
+  res.json({ message: "Wallpaper preset removed successfully", settings });
+});
+
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
   const { search, category, sort } = req.query;
@@ -510,10 +629,30 @@ app.get("/api/files/stats", (_req, res) => {
     }
   });
 
+  // Query actual machine disk storage capacity
+  let serverCapacityBytes = 30 * 1024 * 1024 * 1024; // fallback default
+  let serverFreeBytes: number | undefined;
+
+  try {
+    if (typeof fs.statfsSync === "function") {
+      const diskStats = fs.statfsSync(UPLOADS_DIR);
+      if (diskStats.bsize && diskStats.blocks) {
+        serverCapacityBytes = diskStats.bsize * diskStats.blocks;
+      }
+      if (diskStats.bsize && diskStats.bavail) {
+        serverFreeBytes = diskStats.bsize * diskStats.bavail;
+      }
+    }
+  } catch (err) {
+    console.error("Error reading server disk capacity:", err);
+  }
+
   res.json({
     totalFiles,
     totalSize,
     totalDownloads,
+    serverCapacityBytes,
+    serverFreeBytes,
     categoryBreakdown,
   });
 });

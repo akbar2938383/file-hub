@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, WallpaperSettings, WallpaperConfig } from '../types';
-import { Image, Upload, Sliders, CheckCircle2, Sparkles, RefreshCw, ShieldAlert, Globe, Layers, Eye, Link } from 'lucide-react';
+import { Image, Upload, Sliders, CheckCircle2, Sparkles, RefreshCw, ShieldAlert, Globe, Layers, Eye, Link, Trash2 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Props {
   currentUser: User | null;
@@ -36,6 +37,22 @@ export const WallpaperChangerPage: React.FC<Props> = ({
   const [customUrlInput, setCustomUrlInput] = useState<string>('');
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [presetToDelete, setPresetToDelete] = useState<WallpaperConfig | null>(null);
+
+  // Delete custom wallpaper preset
+  const handleDeletePreset = async (preset: WallpaperConfig) => {
+    try {
+      const res = await fetch(`/api/wallpaper/preset/${preset.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove wallpaper preset');
+      showToast(`Wallpaper preset "${preset.name}" removed`, 'success');
+      onRefreshWallpaper();
+    } catch (err: any) {
+      showToast(err.message || 'Error removing wallpaper preset', 'error');
+    } finally {
+      setPresetToDelete(null);
+    }
+  };
 
   // Apply selected wallpaper globally
   const handleApplyWallpaper = async (
@@ -231,6 +248,8 @@ export const WallpaperChangerPage: React.FC<Props> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {wallpaperSettings?.presets.map((preset) => {
                 const isActive = active?.url === preset.url;
+                const isCustom = preset.category === 'Custom Upload' || preset.url.includes('/api/files/');
+
                 return (
                   <div
                     key={preset.id}
@@ -243,7 +262,7 @@ export const WallpaperChangerPage: React.FC<Props> = ({
                         showToast('Log in as Administrator to apply this wallpaper', 'error');
                       }
                     }}
-                    className={`relative rounded-2xl overflow-hidden aspect-video border-2 transition-all cursor-pointer group ${
+                    className={`relative rounded-2xl overflow-hidden aspect-video border-2 transition-all cursor-pointer group bg-slate-800 ${
                       isActive
                         ? 'border-blue-600 ring-4 ring-blue-500/20 shadow-lg scale-[1.02]'
                         : 'border-slate-200 dark:border-slate-800 hover:border-blue-400 hover:scale-[1.01]'
@@ -252,12 +271,39 @@ export const WallpaperChangerPage: React.FC<Props> = ({
                     <img
                       src={preset.url}
                       alt={preset.name}
+                      onError={(e) => {
+                        // Fallback image handling for deleted files or broken links
+                        const target = e.currentTarget;
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent && !parent.querySelector('.fallback-placeholder')) {
+                          const fallback = document.createElement('div');
+                          fallback.className = 'fallback-placeholder absolute inset-0 flex flex-col items-center justify-center p-2 text-center bg-slate-800 text-slate-400 text-xs font-sans';
+                          fallback.innerHTML = `<span class="font-bold text-slate-300 truncate max-w-full">${preset.name}</span><span class="text-[10px] text-red-400 mt-1">Image removed/missing</span>`;
+                          parent.appendChild(fallback);
+                        }
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-80" />
                     
+                    {/* Delete preset button */}
+                    {(isAdmin || isCustom) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPresetToDelete(preset);
+                        }}
+                        title="Delete wallpaper preset"
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-slate-900/80 hover:bg-red-600 text-slate-300 hover:text-white transition-colors opacity-90 sm:opacity-0 group-hover:opacity-100 z-10 shadow-md backdrop-blur-sm"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
                     <div className="absolute bottom-2 left-2 right-2 flex items-end justify-between">
-                      <span className="text-xs font-semibold text-white drop-shadow-md truncate">
+                      <span className="text-xs font-semibold text-white drop-shadow-md truncate max-w-[80%]">
                         {preset.name}
                       </span>
                       {isActive && (
@@ -425,6 +471,19 @@ export const WallpaperChangerPage: React.FC<Props> = ({
         </div>
 
       </div>
+
+      {/* Delete Preset Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={presetToDelete !== null}
+        title="Remove Wallpaper Preset"
+        message={`Are you sure you want to remove wallpaper "${presetToDelete?.name || ''}"? If this image was uploaded, its server file will also be deleted.`}
+        onClose={() => setPresetToDelete(null)}
+        onConfirm={() => {
+          if (presetToDelete) {
+            handleDeletePreset(presetToDelete);
+          }
+        }}
+      />
 
     </div>
   );

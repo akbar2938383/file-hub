@@ -21,7 +21,6 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // App Navigation & Auth State
-  const [activePage, setActivePage] = useState<ActivePage>('files');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('vault_user');
@@ -29,16 +28,17 @@ export default function App() {
     } catch (e) {
       console.error('Error reading saved user:', e);
     }
-    // Default logged in as Administrator for instant full access
-    return {
-      id: 'user-admin-1',
-      username: 'admin',
-      role: 'administrator',
-      fullName: 'System Administrator',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-      createdAt: new Date().toISOString(),
-    };
+    return null;
   });
+
+  const [activePage, setActivePage] = useState<ActivePage>(() => (currentUser ? 'files' : 'login'));
+
+  // Force login page if unauthenticated
+  useEffect(() => {
+    if (!currentUser && activePage !== 'login') {
+      setActivePage('login');
+    }
+  }, [currentUser, activePage]);
 
   // Wallpaper Settings State (Live Polled)
   const [wallpaperSettings, setWallpaperSettings] = useState<WallpaperSettings | null>(null);
@@ -104,7 +104,8 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-    showToast('Signed out. Continuing as Public Guest.', 'success');
+    setActivePage('login');
+    showToast('Signed out successfully. Please log in to access the system.', 'success');
   };
 
   const fetchStats = useCallback(async () => {
@@ -250,6 +251,8 @@ export default function App() {
           <Navbar
             activePage={activePage}
             currentUser={currentUser}
+            fileCount={files.length}
+            showToast={showToast}
             onNavigate={(page) => setActivePage(page)}
             onLogout={handleLogout}
             onOpenUpload={() => setIsUploadOpen(true)}
@@ -351,9 +354,18 @@ export default function App() {
             <strong className="text-slate-800 dark:text-slate-200">
               {currentUser ? `${currentUser.fullName} (${currentUser.role})` : 'Public Guest'}
             </strong>{' '}
-            &bull; Live Wallpaper Sync Connected
+            &bull; Watermark:{' '}
+            <span className="font-mono font-bold text-blue-600 dark:text-blue-400">akbar293838</span>
           </p>
         </footer>
+      </div>
+
+      {/* Floating persistent Watermark */}
+      <div className="fixed bottom-3 right-3 z-50 pointer-events-none select-none opacity-50 hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 dark:bg-slate-900/90 text-white border border-slate-700/80 shadow-lg backdrop-blur-md text-[11px] font-mono">
+          <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+          <span className="tracking-wider text-slate-200">akbar293838</span>
+        </div>
       </div>
 
       {/* Modals */}

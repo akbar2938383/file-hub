@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { Users, UserPlus, ShieldCheck, UserCheck, Trash2, Edit3, Key, Lock, CheckCircle2, AlertCircle, X, ShieldAlert, Sparkles, Clock } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Props {
   currentUser: User | null;
@@ -25,6 +26,9 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
   const [editFullName, setEditFullName] = useState('');
   const [editRole, setEditRole] = useState<'administrator' | 'normal'>('normal');
   const [editPassword, setEditPassword] = useState('');
+
+  // Delete User Confirmation Modal
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -104,25 +108,31 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
   };
 
   // Delete user handler
-  const handleDeleteUser = async (targetUser: User) => {
-    if (targetUser.username === 'admin') {
-      showToast('Cannot delete primary System Administrator', 'error');
+  const handlePromptDeleteUser = (targetUser: User) => {
+    if (targetUser.username === 'akbar293838' || targetUser.username === 'admin' || targetUser.id === 'user-admin-1') {
+      showToast('Cannot delete primary System Administrator account', 'error');
       return;
     }
+    setUserToDelete(targetUser);
+  };
 
-    if (!confirm(`Are you sure you want to delete user @${targetUser.username}?`)) return;
+  const handleExecuteDeleteUser = async () => {
+    if (!userToDelete) return;
 
     try {
-      const res = await fetch(`/api/users/${targetUser.id}`, {
+      const res = await fetch(`/api/users/${userToDelete.id}`, {
         method: 'DELETE',
       });
 
-      if (!res.ok) throw new Error('Failed to delete user');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
 
-      showToast(`User @${targetUser.username} deleted`, 'success');
+      showToast(`User @${userToDelete.username} deleted successfully`, 'success');
+      setUserToDelete(null);
       fetchUsers();
     } catch (err: any) {
       showToast(err.message || 'Error deleting user', 'error');
+      setUserToDelete(null);
     }
   };
 
@@ -250,9 +260,9 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
                       <span>Edit Role</span>
                     </button>
 
-                    {u.username !== 'admin' && (
+                    {u.username !== 'akbar293838' && u.username !== 'admin' && u.id !== 'user-admin-1' && (
                       <button
-                        onClick={() => handleDeleteUser(u)}
+                        onClick={() => handlePromptDeleteUser(u)}
                         className="px-2.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -493,6 +503,15 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
           </div>
         </div>
       )}
+
+      {/* Delete User Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={userToDelete !== null}
+        title="Delete User Account"
+        message={`Are you sure you want to delete user @${userToDelete?.username || ''}? This action cannot be undone.`}
+        onClose={() => setUserToDelete(null)}
+        onConfirm={handleExecuteDeleteUser}
+      />
 
     </div>
   );

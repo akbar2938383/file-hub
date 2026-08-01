@@ -12,8 +12,8 @@ interface Props {
 export const StorageSummaryCard: React.FC<Props> = ({ stats, onSelectCategory, activeCategory }) => {
   if (!stats) return null;
 
-  const MAX_STORAGE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB simulated threshold
-  const usedPercent = Math.min(100, Math.round((stats.totalSize / MAX_STORAGE_LIMIT) * 100));
+  const serverCapacity = stats.serverCapacityBytes || (30 * 1024 * 1024 * 1024);
+  const usedPercent = Math.min(100, Math.round((stats.totalSize / serverCapacity) * 100));
 
   const categories = [
     { key: 'all', label: 'All Files', icon: Layers, count: stats.totalFiles, size: stats.totalSize, color: 'text-slate-700 bg-slate-100 dark:bg-slate-800 dark:text-slate-200' },
@@ -33,14 +33,14 @@ export const StorageSummaryCard: React.FC<Props> = ({ stats, onSelectCategory, a
             <HardDrive className="w-7 h-7" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-10 font-sans">Server Storage</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {stats.totalFiles} file{stats.totalFiles === 1 ? '' : 's'} stored • {formatBytes(stats.totalSize)} total
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 font-sans">Server Storage</h2>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+              {stats.totalFiles} file{stats.totalFiles === 1 ? '' : 's'} stored &bull; <strong className="text-blue-600 dark:text-blue-400">{formatBytes(stats.totalSize)}</strong> / {formatBytes(serverCapacity)}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap items-center gap-6">
           <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800/60 px-4 py-2.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
             <Download className="w-5 h-5 text-indigo-500" />
             <div>
@@ -49,15 +49,15 @@ export const StorageSummaryCard: React.FC<Props> = ({ stats, onSelectCategory, a
             </div>
           </div>
 
-          <div className="min-w-[180px]">
-            <div className="flex justify-between text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
-              <span>Used Space</span>
-              <span>{usedPercent}%</span>
+          <div className="min-w-[220px] flex-1 sm:flex-none">
+            <div className="flex justify-between items-center text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5 gap-2">
+              <span>Used Space ({formatBytes(stats.totalSize)} / {formatBytes(serverCapacity)})</span>
+              <span className="font-bold text-blue-600 dark:text-blue-400">{usedPercent}%</span>
             </div>
             <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
               <div
                 className="bg-blue-600 h-full rounded-full transition-all duration-500"
-                style={{ width: `${Math.max(usedPercent, 2)}%` }}
+                style={{ width: `${Math.max(usedPercent, 1)}%` }}
               />
             </div>
           </div>
