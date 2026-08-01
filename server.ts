@@ -28,6 +28,167 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 const METADATA_FILE = path.join(UPLOADS_DIR, "metadata.json");
+const USERS_FILE = path.join(UPLOADS_DIR, "users.json");
+const SETTINGS_FILE = path.join(UPLOADS_DIR, "settings.json");
+
+interface UserRecord {
+  id: string;
+  username: string;
+  password?: string;
+  role: 'administrator' | 'normal';
+  fullName: string;
+  avatar: string;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+interface WallpaperConfig {
+  id: string;
+  name: string;
+  url: string;
+  blur: number;
+  overlayOpacity: number;
+  brightness: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface SettingsRecord {
+  activeWallpaper: WallpaperConfig;
+  presets: Array<{ id: string; name: string; url: string; category: string }>;
+}
+
+// Initial default users
+const DEFAULT_USERS: UserRecord[] = [
+  {
+    id: "user-admin-1",
+    username: "admin",
+    password: "admin123",
+    role: "administrator",
+    fullName: "System Administrator",
+    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+    createdAt: "2026-08-01T10:00:00.000Z",
+  },
+  {
+    id: "user-normal-1",
+    username: "user",
+    password: "user123",
+    role: "normal",
+    fullName: "John Normal User",
+    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
+    createdAt: "2026-08-01T10:00:00.000Z",
+  }
+];
+
+// Initial default settings
+const DEFAULT_SETTINGS: SettingsRecord = {
+  activeWallpaper: {
+    id: "wp-1",
+    name: "Aurora Borealis Night",
+    url: "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80",
+    blur: 0,
+    overlayOpacity: 0.35,
+    brightness: 0.85,
+    updatedBy: "System Administrator",
+    updatedAt: new Date().toISOString(),
+  },
+  presets: [
+    {
+      id: "wp-1",
+      name: "Aurora Borealis Night",
+      url: "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80",
+      category: "Nature"
+    },
+    {
+      id: "wp-2",
+      name: "Cyberpunk Neon City",
+      url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=2000&q=80",
+      category: "Cyberpunk"
+    },
+    {
+      id: "wp-3",
+      name: "Minimalist Mountain Range",
+      url: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=2000&q=80",
+      category: "Landscape"
+    },
+    {
+      id: "wp-4",
+      name: "Deep Cosmic Nebula",
+      url: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=2000&q=80",
+      category: "Space"
+    },
+    {
+      id: "wp-5",
+      name: "Abstract Geometric Glass",
+      url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=2000&q=80",
+      category: "Abstract"
+    },
+    {
+      id: "wp-6",
+      name: "Misty Pine Forest",
+      url: "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=2000&q=80",
+      category: "Nature"
+    },
+    {
+      id: "wp-7",
+      name: "Golden Sunset Ocean",
+      url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2000&q=80",
+      category: "Nature"
+    },
+    {
+      id: "wp-8",
+      name: "Dark Tech Hex Matrix",
+      url: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=2000&q=80",
+      category: "Cyberpunk"
+    }
+  ]
+};
+
+// Users helper
+function getUsers(): UserRecord[] {
+  try {
+    if (!fs.existsSync(USERS_FILE)) {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(DEFAULT_USERS, null, 2), "utf-8");
+      return DEFAULT_USERS;
+    }
+    const data = fs.readFileSync(USERS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    console.error("Error reading users:", err);
+    return DEFAULT_USERS;
+  }
+}
+
+function saveUsers(users: UserRecord[]) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving users:", err);
+  }
+}
+
+// Settings / Wallpaper helper
+function getSettings(): SettingsRecord {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) {
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2), "utf-8");
+      return DEFAULT_SETTINGS;
+    }
+    const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    console.error("Error reading settings:", err);
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function saveSettings(settings: SettingsRecord) {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving settings:", err);
+  }
+}
 
 // Helper to read metadata
 function getMetadata(): FileRecord[] {
@@ -92,6 +253,199 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --- API ROUTES ---
+
+// --- AUTH & USER CONTROL ENDPOINTS ---
+
+// Login
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  const users = getUsers();
+  const userIndex = users.findIndex(
+    (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
+  );
+
+  if (userIndex === -1) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
+
+  // Update last login
+  users[userIndex].lastLoginAt = new Date().toISOString();
+  saveUsers(users);
+
+  const { password: _, ...userWithoutPassword } = users[userIndex];
+  res.json({ message: "Login successful", user: userWithoutPassword });
+});
+
+// List Users
+app.get("/api/users", (_req, res) => {
+  const users = getUsers();
+  const safeUsers = users.map(({ password: _, ...u }) => u);
+  res.json(safeUsers);
+});
+
+// Create User (Admin action)
+app.post("/api/users", (req, res) => {
+  const { username, password, role, fullName } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  const users = getUsers();
+  if (users.some((u) => u.username.toLowerCase() === username.trim().toLowerCase())) {
+    return res.status(400).json({ error: "Username already exists" });
+  }
+
+  const newUser: UserRecord = {
+    id: `user-${crypto.randomUUID().slice(0, 8)}`,
+    username: username.trim(),
+    password: password.trim(),
+    role: role === "administrator" ? "administrator" : "normal",
+    fullName: fullName ? fullName.trim() : username.trim(),
+    avatar: role === "administrator"
+      ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
+      : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
+    createdAt: new Date().toISOString(),
+  };
+
+  users.push(newUser);
+  saveUsers(users);
+
+  const { password: _, ...safeUser } = newUser;
+  res.status(201).json({ message: "User created successfully", user: safeUser });
+});
+
+// Update User (Admin action or self)
+app.put("/api/users/:id", (req, res) => {
+  const { id } = req.params;
+  const { role, fullName, password } = req.body;
+
+  const users = getUsers();
+  const index = users.findIndex((u) => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (role && (role === "administrator" || role === "normal")) {
+    users[index].role = role;
+  }
+  if (fullName && typeof fullName === "string") {
+    users[index].fullName = fullName.trim();
+  }
+  if (password && typeof password === "string" && password.trim() !== "") {
+    users[index].password = password.trim();
+  }
+
+  saveUsers(users);
+  const { password: _, ...safeUser } = users[index];
+  res.json({ message: "User updated successfully", user: safeUser });
+});
+
+// Delete User (Admin action)
+app.delete("/api/users/:id", (req, res) => {
+  const { id } = req.params;
+  let users = getUsers();
+  const target = users.find((u) => u.id === id);
+
+  if (!target) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  // Prevent deleting the main admin
+  if (target.username === "admin") {
+    return res.status(400).json({ error: "Cannot delete primary System Administrator account" });
+  }
+
+  users = users.filter((u) => u.id !== id);
+  saveUsers(users);
+  res.json({ message: "User deleted successfully" });
+});
+
+// --- WALLPAPER ENDPOINTS ---
+
+// Get current active wallpaper & presets
+app.get("/api/wallpaper", (_req, res) => {
+  const settings = getSettings();
+  res.json(settings);
+});
+
+// Update active wallpaper (Admin action or live preview)
+app.post("/api/wallpaper", (req, res) => {
+  const { url, name, blur, overlayOpacity, brightness, updatedBy } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: "Wallpaper URL is required" });
+  }
+
+  const settings = getSettings();
+  settings.activeWallpaper = {
+    id: `wp-${Date.now()}`,
+    name: name || "Custom Selected Wallpaper",
+    url,
+    blur: typeof blur === "number" ? blur : settings.activeWallpaper.blur ?? 0,
+    overlayOpacity: typeof overlayOpacity === "number" ? overlayOpacity : settings.activeWallpaper.overlayOpacity ?? 0.35,
+    brightness: typeof brightness === "number" ? brightness : settings.activeWallpaper.brightness ?? 0.85,
+    updatedBy: updatedBy || "Administrator",
+    updatedAt: new Date().toISOString(),
+  };
+
+  saveSettings(settings);
+  res.json({ message: "Wallpaper updated successfully", activeWallpaper: settings.activeWallpaper });
+});
+
+// Upload custom image as active wallpaper
+app.post("/api/wallpaper/upload", upload.single("wallpaper"), (req, res) => {
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ error: "No wallpaper image provided" });
+  }
+
+  const category = detectCategory(file.mimetype || "image/jpeg", file.originalname);
+  const fileRecord: FileRecord = {
+    id: crypto.randomUUID(),
+    originalName: file.originalname,
+    filename: file.filename,
+    size: file.size,
+    mimeType: file.mimetype || "image/jpeg",
+    uploadDate: new Date().toISOString(),
+    category,
+    tags: ["wallpaper", "custom-background"],
+    description: "Custom uploaded wallpaper",
+    downloadCount: 0,
+  };
+
+  // Save to metadata as well so it appears in file manager
+  const files = getMetadata();
+  saveMetadata([fileRecord, ...files]);
+
+  const wallpaperUrl = `/api/files/${fileRecord.id}/view`;
+  const settings = getSettings();
+
+  settings.activeWallpaper = {
+    id: `wp-${Date.now()}`,
+    name: file.originalname,
+    url: wallpaperUrl,
+    blur: 0,
+    overlayOpacity: 0.35,
+    brightness: 0.85,
+    updatedBy: req.body.updatedBy || "Administrator",
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Add to presets
+  settings.presets.unshift({
+    id: `wp-preset-${Date.now()}`,
+    name: file.originalname,
+    url: wallpaperUrl,
+    category: "Custom Upload",
+  });
+
+  saveSettings(settings);
+  res.status(201).json({ message: "Custom wallpaper uploaded and activated", activeWallpaper: settings.activeWallpaper });
+});
 
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
