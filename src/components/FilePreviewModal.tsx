@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileRecord } from '../types';
 import { formatBytes, formatDate } from '../utils/formatters';
-import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2 } from 'lucide-react';
+import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2, QrCode } from 'lucide-react';
 
 interface Props {
   file: FileRecord | null;
@@ -9,9 +9,10 @@ interface Props {
   onClose: () => void;
   onDownload: (file: FileRecord) => void;
   onDelete?: (id: string) => void;
+  onQrCode?: (file: FileRecord) => void;
 }
 
-export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDownload, onDelete }) => {
+export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDownload, onDelete, onQrCode }) => {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [textError, setTextError] = useState<string | null>(null);
@@ -173,6 +174,18 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {onQrCode && (
+              <button
+                id="qr-preview-file"
+                onClick={() => onQrCode(file)}
+                title="Mobile QR Code"
+                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
+              >
+                <QrCode className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span className="hidden sm:inline">QR Code</span>
+              </button>
+            )}
+
             <button
               id="copy-download-link"
               onClick={copyDownloadLink}

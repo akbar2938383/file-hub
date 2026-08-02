@@ -31,10 +31,18 @@ export const LoginPage: React.FC<Props> = ({
     setErrorMessage('');
 
     try {
+      let syncUsers: any[] = [];
+      try {
+        const raw = localStorage.getItem('vault_persistent_users');
+        if (raw) syncUsers = JSON.parse(raw);
+      } catch (e) {
+        console.error('Error reading persistent users:', e);
+      }
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, syncUsers }),
       });
 
       const data = await res.json();

@@ -1,7 +1,7 @@
 import React from 'react';
-import { FileRecord, ViewMode, SortOption } from '../types';
+import { FileRecord, ViewMode, SortOption, StorageStats } from '../types';
 import { FileCard } from './FileCard';
-import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen } from 'lucide-react';
+import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter } from 'lucide-react';
 
 interface Props {
   files: FileRecord[];
@@ -20,6 +20,10 @@ interface Props {
   onBulkDelete: () => void;
   onBulkDownload: () => void;
   onOpenUpload: () => void;
+  onQrCode?: (file: FileRecord) => void;
+  activeCategory?: string;
+  onSelectCategory?: (cat: string) => void;
+  stats?: StorageStats | null;
 }
 
 export const FileList: React.FC<Props> = ({
@@ -39,8 +43,22 @@ export const FileList: React.FC<Props> = ({
   onBulkDelete,
   onBulkDownload,
   onOpenUpload,
+  onQrCode,
+  activeCategory = 'all',
+  onSelectCategory,
+  stats,
 }) => {
   const allSelected = files.length > 0 && selectedIds.length === files.length;
+
+  const categories = [
+    { key: 'all', label: 'All Files', icon: Layers, count: stats?.totalFiles ?? files.length },
+    { key: 'image', label: 'Images', icon: Image, count: stats?.categoryBreakdown?.image?.count ?? files.filter((f) => f.category === 'image').length },
+    { key: 'document', label: 'Documents', icon: FileText, count: stats?.categoryBreakdown?.document?.count ?? files.filter((f) => f.category === 'document').length },
+    { key: 'video', label: 'Videos', icon: Film, count: stats?.categoryBreakdown?.video?.count ?? files.filter((f) => f.category === 'video').length },
+    { key: 'audio', label: 'Audio', icon: Music, count: stats?.categoryBreakdown?.audio?.count ?? files.filter((f) => f.category === 'audio').length },
+    { key: 'code', label: 'Code', icon: Code, count: stats?.categoryBreakdown?.code?.count ?? files.filter((f) => f.category === 'code').length },
+    { key: 'archive', label: 'Archives', icon: Archive, count: stats?.categoryBreakdown?.archive?.count ?? files.filter((f) => f.category === 'archive').length },
+  ];
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -60,69 +78,94 @@ export const FileList: React.FC<Props> = ({
     <div className="space-y-4">
       
       {/* Search & Action Controls Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="flex flex-col gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
         
-        {/* Search Input */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search files by name, tags, description..."
-            className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        {/* View & Sort controls */}
-        <div className="flex items-center gap-3 justify-between md:justify-end">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           
-          {/* Sort selector */}
-          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={sortOption}
-              onChange={(e) => setSortOption(e.target.value as SortOption)}
-              className="bg-transparent text-xs text-slate-700 dark:text-slate-300 font-medium focus:outline-none cursor-pointer"
-            >
-              <option value="date_desc">Newest First</option>
-              <option value="date_asc">Oldest First</option>
-              <option value="name">Name (A-Z)</option>
-              <option value="size_desc">Size (Largest)</option>
-              <option value="size_asc">Size (Smallest)</option>
-              <option value="downloads">Most Downloaded</option>
-            </select>
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search files by name, tags, description..."
+              className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
-          {/* View Toggle */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700">
-            <button
-              id="view-grid-btn"
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'grid'
-                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-              title="Grid View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              id="view-list-btn"
-              onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'list'
-                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-              title="List View"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
+          {/* View, Sort & Category Dropdown controls */}
+          <div className="flex flex-wrap items-center gap-2.5 justify-between md:justify-end">
+            
+            {/* Sort selector */}
+            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value as SortOption)}
+                className="bg-transparent text-xs text-slate-700 dark:text-slate-300 font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="date_desc">Newest First</option>
+                <option value="date_asc">Oldest First</option>
+                <option value="name">Name (A-Z)</option>
+                <option value="size_desc">Size (Largest)</option>
+                <option value="size_asc">Size (Smallest)</option>
+                <option value="downloads">Most Downloaded</option>
+              </select>
+            </div>
 
+            {/* Category Dropdown (placed right beside sort selector as marked) */}
+            {onSelectCategory && (
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                <Filter className="w-3.5 h-3.5 text-blue-500" />
+                <select
+                  id="category-filter-select"
+                  value={activeCategory}
+                  onChange={(e) => onSelectCategory(e.target.value)}
+                  className="bg-transparent text-xs text-slate-700 dark:text-slate-300 font-semibold focus:outline-none cursor-pointer"
+                >
+                  {categories.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label} ({c.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* View Toggle */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700">
+              <button
+                id="view-grid-btn"
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Grid View"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                id="view-list-btn"
+                onClick={() => setViewMode('list')}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="List View"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+
+          </div>
         </div>
+
+
+
       </div>
 
       {/* Bulk Selection Bar */}
@@ -202,6 +245,7 @@ export const FileList: React.FC<Props> = ({
               onPreview={onPreview}
               onEdit={onEdit}
               onDelete={onDelete}
+              onQrCode={onQrCode}
             />
           ))}
         </div>

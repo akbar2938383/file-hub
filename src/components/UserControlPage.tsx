@@ -33,6 +33,23 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
+      // Restore from localStorage backup if present
+      let savedUsersRaw = localStorage.getItem('vault_persistent_users');
+      if (savedUsersRaw) {
+        try {
+          const savedUsers = JSON.parse(savedUsersRaw);
+          if (Array.isArray(savedUsers) && savedUsers.length > 0) {
+            await fetch('/api/users/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ users: savedUsers }),
+            });
+          }
+        } catch (e) {
+          console.error('Sync error:', e);
+        }
+      }
+
       const res = await fetch('/api/users');
       if (res.ok) {
         const data = await res.json();
@@ -69,6 +86,18 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user');
 
+      // Save to localStorage persistent backup
+      if (data.record) {
+        try {
+          const existingRaw = localStorage.getItem('vault_persistent_users');
+          const existing = existingRaw ? JSON.parse(existingRaw) : [];
+          const updated = [...existing.filter((u: any) => u.username !== data.record.username), data.record];
+          localStorage.setItem('vault_persistent_users', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Error saving to localStorage:', e);
+        }
+      }
+
       showToast(`User @${data.user.username} created successfully`, 'success');
       setIsAddUserOpen(false);
       setNewUsername('');
@@ -99,6 +128,28 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update user');
 
+      // Update in localStorage
+      try {
+        const existingRaw = localStorage.getItem('vault_persistent_users');
+        if (existingRaw) {
+          const existing = JSON.parse(existingRaw);
+          const updated = existing.map((u: any) => {
+            if (u.id === editingUser.id || u.username === editingUser.username) {
+              return {
+                ...u,
+                fullName: editFullName || u.fullName,
+                role: editRole || u.role,
+                ...(editPassword ? { password: editPassword } : {}),
+              };
+            }
+            return u;
+          });
+          localStorage.setItem('vault_persistent_users', JSON.stringify(updated));
+        }
+      } catch (e) {
+        console.error('Error updating localStorage:', e);
+      }
+
       showToast(`User @${editingUser.username} updated`, 'success');
       setEditingUser(null);
       fetchUsers();
@@ -126,6 +177,18 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+
+      // Remove from localStorage
+      try {
+        const existingRaw = localStorage.getItem('vault_persistent_users');
+        if (existingRaw) {
+          const existing = JSON.parse(existingRaw);
+          const updated = existing.filter((u: any) => u.id !== userToDelete.id && u.username !== userToDelete.username);
+          localStorage.setItem('vault_persistent_users', JSON.stringify(updated));
+        }
+      } catch (e) {
+        console.error('Error deleting from localStorage:', e);
+      }
 
       showToast(`User @${userToDelete.username} deleted successfully`, 'success');
       setUserToDelete(null);
@@ -168,14 +231,6 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
         </div>
       </div>
 
-      {!isAdmin && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-medium flex items-center gap-3">
-          <ShieldAlert className="w-5 h-5 shrink-0 text-amber-500" />
-          <span>
-            You are currently viewing in read-only mode. To modify user roles or create new accounts, please log in as an <strong>Administrator</strong> (admin / admin123).
-          </span>
-        </div>
-      )}
 
       {/* Users Roster Grid */}
       <div className="p-6 rounded-3xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-xl backdrop-blur-md">

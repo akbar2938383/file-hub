@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileRecord, ViewMode } from '../types';
 import { formatBytes, formatDate, getCategoryBadgeColor } from '../utils/formatters';
-import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File } from 'lucide-react';
+import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode } from 'lucide-react';
 
 interface Props {
   file: FileRecord;
@@ -12,6 +12,7 @@ interface Props {
   onPreview: (file: FileRecord) => void;
   onEdit: (file: FileRecord) => void;
   onDelete: (id: string) => void;
+  onQrCode?: (file: FileRecord) => void;
 }
 
 export const FileCard: React.FC<Props> = ({
@@ -23,6 +24,7 @@ export const FileCard: React.FC<Props> = ({
   onPreview,
   onEdit,
   onDelete,
+  onQrCode,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -100,6 +102,20 @@ export const FileCard: React.FC<Props> = ({
 
         {/* List Action Buttons */}
         <div className="flex items-center gap-1 shrink-0">
+          {onQrCode && (
+            <button
+              id={`qr-file-${file.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQrCode(file);
+              }}
+              title="Mobile QR Code"
+              className="p-2 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             id={`download-file-${file.id}`}
             onClick={() => onDownload(file)}
@@ -214,6 +230,19 @@ export const FileCard: React.FC<Props> = ({
         </button>
 
         <div className="flex items-center gap-1">
+          {onQrCode && (
+            <button
+              id={`grid-qr-${file.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQrCode(file);
+              }}
+              title="QR Code"
+              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
+          )}
           <button
             id={`grid-preview-${file.id}`}
             onClick={() => onPreview(file)}

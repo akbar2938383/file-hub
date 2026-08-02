@@ -30,6 +30,7 @@ export const Navbar: React.FC<Props> = ({
   isRefreshing,
 }) => {
   const isCurlActive = currentUser !== null && fileCount >= 1;
+  const isAdmin = currentUser?.role === 'administrator';
 
   const handleCurlClick = () => {
     if (!currentUser) {
@@ -62,12 +63,9 @@ export const Navbar: React.FC<Props> = ({
         <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
           <div
             onClick={() => onNavigate('files')}
-            className="flex items-center gap-2 cursor-pointer group"
+            className="hidden md:flex items-center gap-2 cursor-pointer group"
           >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform shrink-0">
-              <HardDrive className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="hidden md:block">
+            <div>
               <div className="flex items-center gap-1.5">
                 <h1 className="font-extrabold text-base text-slate-900 dark:text-slate-100 leading-tight">
                   File Vault & Hub
@@ -83,7 +81,7 @@ export const Navbar: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Navigation Navigation Tabs */}
+          {/* Navigation Tabs */}
           <nav className="flex items-center bg-slate-100 dark:bg-slate-800/80 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-[11px] sm:text-xs font-semibold">
             <button
               onClick={() => onNavigate(currentUser ? 'files' : 'login')}
@@ -98,31 +96,35 @@ export const Navbar: React.FC<Props> = ({
               <span>Files</span>
             </button>
 
-            <button
-              onClick={() => onNavigate(currentUser ? 'wallpaper' : 'login')}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
-                activePage === 'wallpaper'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              } ${!currentUser ? 'opacity-60 cursor-not-allowed' : ''}`}
-              title="Wallpapers"
-            >
-              <Image className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-              <span className="hidden xs:inline">Wallpapers</span>
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => onNavigate('wallpaper')}
+                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
+                    activePage === 'wallpaper'
+                      ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                  title="Wallpapers"
+                >
+                  <Image className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                  <span className="hidden xs:inline">Wallpapers</span>
+                </button>
 
-            <button
-              onClick={() => onNavigate(currentUser ? 'users' : 'login')}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
-                activePage === 'users'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              } ${!currentUser ? 'opacity-60 cursor-not-allowed' : ''}`}
-              title="Users Control"
-            >
-              <Users className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-              <span className="hidden sm:inline">Users</span>
-            </button>
+                <button
+                  onClick={() => onNavigate('users')}
+                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
+                    activePage === 'users'
+                      ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                  title="Users Control"
+                >
+                  <Users className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">Users</span>
+                </button>
+              </>
+            )}
           </nav>
         </div>
 
@@ -189,8 +191,12 @@ export const Navbar: React.FC<Props> = ({
           {currentUser ? (
             <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800 shrink-0">
               <div
-                onClick={() => onNavigate('users')}
-                className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                onClick={() => {
+                  if (isAdmin) onNavigate('users');
+                }}
+                className={`flex items-center gap-1.5 p-1 rounded-xl transition-colors ${
+                  isAdmin ? 'hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer' : ''
+                }`}
                 title={`Logged in as ${currentUser.fullName} (${currentUser.role})`}
               >
                 <img

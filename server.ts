@@ -330,12 +330,39 @@ app.use(express.urlencoded({ extended: true }));
 
 // Login
 app.post("/api/auth/login", (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, syncUsers } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: "Username and password are required" });
   }
 
-  const users = getUsers();
+  let users = getUsers();
+
+  // If client passed syncUsers, rehydrate missing accounts
+  if (Array.isArray(syncUsers) && syncUsers.length > 0) {
+    let modified = false;
+    for (const cu of syncUsers) {
+      if (!cu || !cu.username) continue;
+      const idx = users.findIndex(
+        (u) => u.id === cu.id || u.username.toLowerCase() === cu.username.toLowerCase()
+      );
+      if (idx === -1) {
+        users.push({
+          id: cu.id || `user-${crypto.randomUUID().slice(0, 8)}`,
+          username: cu.username,
+          password: cu.password || password,
+          role: cu.role === "administrator" ? "administrator" : "normal",
+          fullName: cu.fullName || cu.username,
+          avatar: cu.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
+          createdAt: cu.createdAt || new Date().toISOString(),
+        });
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveUsers(users);
+    }
+  }
+
   const userIndex = users.findIndex(
     (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
   );
@@ -350,6 +377,46 @@ app.post("/api/auth/login", (req, res) => {
 
   const { password: _, ...userWithoutPassword } = users[userIndex];
   res.json({ message: "Login successful", user: userWithoutPassword });
+});
+
+// Sync Users (Client-side persistent backup restore)
+app.post("/api/users/sync", (req, res) => {
+  const { users: clientUsers } = req.body;
+  if (!Array.isArray(clientUsers)) {
+    return res.status(400).json({ error: "Invalid sync format" });
+  }
+
+  const currentUsers = getUsers();
+  let modified = false;
+
+  for (const cu of clientUsers) {
+    if (!cu || !cu.username) continue;
+    const existingIndex = currentUsers.findIndex(
+      (u) => u.id === cu.id || u.username.toLowerCase() === cu.username.toLowerCase()
+    );
+
+    if (existingIndex === -1) {
+      currentUsers.push({
+        id: cu.id || `user-${crypto.randomUUID().slice(0, 8)}`,
+        username: cu.username,
+        password: cu.password || "27112009",
+        role: cu.role === "administrator" ? "administrator" : "normal",
+        fullName: cu.fullName || cu.username,
+        avatar: cu.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
+        createdAt: cu.createdAt || new Date().toISOString(),
+      });
+      modified = true;
+    } else if (cu.password && currentUsers[existingIndex].password !== cu.password) {
+      currentUsers[existingIndex].password = cu.password;
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    saveUsers(currentUsers);
+  }
+
+  res.json({ message: "Users synchronized", users: currentUsers });
 });
 
 // List Users
@@ -387,7 +454,7 @@ app.post("/api/users", (req, res) => {
   saveUsers(users);
 
   const { password: _, ...safeUser } = newUser;
-  res.status(201).json({ message: "User created successfully", user: safeUser });
+  res.status(201).json({ message: "User created successfully", user: safeUser, record: newUser });
 });
 
 // Update User (Admin action or self)

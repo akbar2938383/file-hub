@@ -9,6 +9,7 @@ import { EditFileModal } from './components/EditFileModal';
 import { FilePreviewModal } from './components/FilePreviewModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { CurlGeneratorModal } from './components/CurlGeneratorModal';
+import { QRCodeModal } from './components/QRCodeModal';
 import { LoginPage } from './components/LoginPage';
 import { WallpaperChangerPage } from './components/WallpaperChangerPage';
 import { UserControlPage } from './components/UserControlPage';
@@ -56,6 +57,7 @@ export default function App() {
   const [isCurlOpen, setIsCurlOpen] = useState<boolean>(false);
   const [editingFile, setEditingFile] = useState<FileRecord | null>(null);
   const [previewingFile, setPreviewingFile] = useState<FileRecord | null>(null);
+  const [qrCodeFile, setQrCodeFile] = useState<FileRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id?: string; bulk?: boolean; name?: string } | null>(null);
 
   // Toast Feedback
@@ -84,6 +86,24 @@ export default function App() {
   useEffect(() => {
     fetchWallpaperSettings();
     const interval = setInterval(fetchWallpaperSettings, 3000);
+
+    // Sync persistent user accounts on startup
+    const rawUsers = localStorage.getItem('vault_persistent_users');
+    if (rawUsers) {
+      try {
+        const users = JSON.parse(rawUsers);
+        if (Array.isArray(users) && users.length > 0) {
+          fetch('/api/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ users }),
+          }).catch((err) => console.error('Initial user sync failed:', err));
+        }
+      } catch (e) {
+        console.error('Error parsing stored persistent users:', e);
+      }
+    }
+
     return () => clearInterval(interval);
   }, [fetchWallpaperSettings]);
 
@@ -295,33 +315,74 @@ export default function App() {
           )}
 
           {activePage === 'wallpaper' && (
-            <WallpaperChangerPage
-              currentUser={currentUser}
-              wallpaperSettings={wallpaperSettings}
-              onRefreshWallpaper={fetchWallpaperSettings}
-              showToast={showToast}
-            />
+            currentUser?.role === 'administrator' ? (
+              <WallpaperChangerPage
+                currentUser={currentUser}
+                wallpaperSettings={wallpaperSettings}
+                onRefreshWallpaper={fetchWallpaperSettings}
+                showToast={showToast}
+              />
+            ) : (
+              <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <FileList
+                  files={files}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  searchTerm={searchTerm}
+                  setSearchTerm={setSearchTerm}
+                  sortOption={sortOption}
+                  setSortOption={setSortOption}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onDownload={handleDownloadFile}
+                  onPreview={(f) => setPreviewingFile(f)}
+                  onEdit={(f) => setEditingFile(f)}
+                  onDelete={requestSingleDelete}
+                  onBulkDelete={requestBulkDelete}
+                  onBulkDownload={handleBulkDownload}
+                  onOpenUpload={() => setIsUploadOpen(true)}
+                  onQrCode={(f) => setQrCodeFile(f)}
+                />
+              </main>
+            )
           )}
 
           {activePage === 'users' && (
-            <UserControlPage
-              currentUser={currentUser}
-              showToast={showToast}
-            />
+            currentUser?.role === 'administrator' ? (
+              <UserControlPage
+                currentUser={currentUser}
+                showToast={showToast}
+              />
+            ) : (
+              <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <FileList
+                  files={files}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  searchTerm={searchTerm}
+                  setSearchTerm={setSearchTerm}
+                  sortOption={sortOption}
+                  setSortOption={setSortOption}
+                  selectedIds={selectedIds}
+                  setSelectedIds={setSelectedIds}
+                  onDownload={handleDownloadFile}
+                  onPreview={(f) => setPreviewingFile(f)}
+                  onEdit={(f) => setEditingFile(f)}
+                  onDelete={requestSingleDelete}
+                  onBulkDelete={requestBulkDelete}
+                  onBulkDownload={handleBulkDownload}
+                  onOpenUpload={() => setIsUploadOpen(true)}
+                  onQrCode={(f) => setQrCodeFile(f)}
+                />
+              </main>
+            )
           )}
 
           {activePage === 'files' && (
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
               
               {/* Storage Summary Card */}
-              <StorageSummaryCard
-                stats={stats}
-                onSelectCategory={(cat) => {
-                  setActiveCategory(cat as CategoryFilter);
-                  setSelectedIds([]);
-                }}
-                activeCategory={activeCategory}
-              />
+              <StorageSummaryCard stats={stats} />
 
               {/* File Manager Section */}
               <FileList
@@ -341,6 +402,13 @@ export default function App() {
                 onBulkDelete={requestBulkDelete}
                 onBulkDownload={handleBulkDownload}
                 onOpenUpload={() => setIsUploadOpen(true)}
+                onQrCode={(f) => setQrCodeFile(f)}
+                activeCategory={activeCategory}
+                onSelectCategory={(cat) => {
+                  setActiveCategory(cat as CategoryFilter);
+                  setSelectedIds([]);
+                }}
+                stats={stats}
               />
 
             </main>
@@ -405,6 +473,13 @@ export default function App() {
         onClose={() => setPreviewingFile(null)}
         onDownload={handleDownloadFile}
         onDelete={requestSingleDelete}
+        onQrCode={(f) => setQrCodeFile(f)}
+      />
+
+      <QRCodeModal
+        file={qrCodeFile}
+        isOpen={!!qrCodeFile}
+        onClose={() => setQrCodeFile(null)}
       />
 
       <ConfirmDeleteModal
