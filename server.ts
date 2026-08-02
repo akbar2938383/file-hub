@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import multer from "multer";
+import JSZip from "jszip";
 import { createServer as createViteServer } from "vite";
 
 interface FileRecord {
@@ -12,10 +13,16 @@ interface FileRecord {
   size: number;
   mimeType: string;
   uploadDate: string;
-  category: 'image' | 'document' | 'audio' | 'video' | 'archive' | 'code' | 'other';
+  category: 'image' | 'document' | 'audio' | 'video' | 'archive' | 'code' | 'folder' | 'other';
   tags: string[];
   description?: string;
   downloadCount: number;
+  uploadedBy?: string;
+  uploadedByRole?: 'administrator' | 'normal';
+  isFolder?: boolean;
+  folderPath?: string;
+  relativePath?: string;
+  itemCount?: number;
 }
 
 const app = express();
@@ -526,7 +533,7 @@ app.post("/api/users", (req, res) => {
 // Update User (Admin action or self)
 app.put("/api/users/:id", (req, res) => {
   const { id } = req.params;
-  const { role, fullName, password } = req.body;
+  const { role, fullName, password, avatar } = req.body;
 
   const users = getUsers();
   const index = users.findIndex((u) => u.id === id);
@@ -544,10 +551,58 @@ app.put("/api/users/:id", (req, res) => {
   if (password && typeof password === "string" && password.trim() !== "") {
     users[index].password = password.trim();
   }
+  if (avatar && typeof avatar === "string" && avatar.trim() !== "") {
+    users[index].avatar = avatar.trim();
+  }
 
   saveUsers(users);
   const { password: _, ...safeUser } = users[index];
   res.json({ message: "User updated successfully", user: safeUser });
+});
+
+// Update User Profile Picture / Avatar via File Upload
+app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
+  const { id } = req.params;
+  const file = req.file;
+
+  const users = getUsers();
+  const index = users.findIndex((u) => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!file) {
+    return res.status(400).json({ error: "No image file provided" });
+  }
+
+  const recordId = `avatar-${crypto.randomUUID()}`;
+  const avatarUrl = `/api/files/${recordId}/view`;
+  users[index].avatar = avatarUrl;
+
+  // Also register image in metadata so it exists in FileVault
+  const category = detectCategory(file.mimetype || "image/png", file.originalname);
+  const record: FileRecord = {
+    id: recordId,
+    originalName: `Avatar_${users[index].username}_${file.originalname}`,
+    filename: file.filename,
+    size: file.size,
+    mimeType: file.mimetype || "image/png",
+    uploadDate: new Date().toISOString(),
+    category,
+    tags: ["avatar", "user-pfp"],
+    description: `Profile picture for @${users[index].username}`,
+    downloadCount: 0,
+    uploadedBy: users[index].username,
+    uploadedByRole: users[index].role,
+  };
+
+  const existingRecords = getMetadata();
+  saveMetadata([record, ...existingRecords]);
+
+  saveUsers(users);
+  const { password: _, ...safeUser } = users[index];
+  res.json({ message: "Avatar updated successfully", user: safeUser, avatarUrl });
 });
 
 // Delete User (Admin action)
@@ -576,6 +631,44 @@ app.delete("/api/users/:id", (req, res) => {
 app.get("/api/wallpaper", (_req, res) => {
   const settings = getSettings();
   res.json(settings);
+});
+
+// Sync wallpaper settings from client persistent backup
+app.post("/api/wallpaper/sync", (req, res) => {
+  const { activeWallpaper, presets } = req.body;
+  if (!activeWallpaper && !presets) {
+    return res.status(400).json({ error: "Invalid sync payload" });
+  }
+
+  const current = getSettings();
+  let modified = false;
+
+  if (activeWallpaper && activeWallpaper.url) {
+    // Restore active wallpaper if server was reset
+    current.activeWallpaper = {
+      ...current.activeWallpaper,
+      ...activeWallpaper,
+      updatedAt: new Date().toISOString(),
+    };
+    modified = true;
+  }
+
+  if (Array.isArray(presets) && presets.length > 0) {
+    for (const p of presets) {
+      if (!p || !p.id) continue;
+      const idx = current.presets.findIndex((cp) => cp.id === p.id || cp.url === p.url);
+      if (idx === -1) {
+        current.presets.push(p);
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    saveSettings(current);
+  }
+
+  res.json({ message: "Wallpaper settings synchronized", settings: current });
 });
 
 // Update active wallpaper (Admin action or live preview)
@@ -702,6 +795,32 @@ app.delete("/api/wallpaper/preset/:id", (req, res) => {
   res.json({ message: "Wallpaper preset removed successfully", settings });
 });
 
+// Sync file metadata records from client backup
+app.post("/api/files/sync", (req, res) => {
+  const { files: clientFiles } = req.body;
+  if (!Array.isArray(clientFiles)) {
+    return res.status(400).json({ error: "Invalid files sync format" });
+  }
+
+  const currentRecords = getMetadata();
+  let modified = false;
+
+  for (const cf of clientFiles) {
+    if (!cf || !cf.id || !cf.originalName) continue;
+    const existing = currentRecords.find((r) => r.id === cf.id);
+    if (!existing) {
+      currentRecords.push(cf);
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    saveMetadata(currentRecords);
+  }
+
+  res.json({ message: "File metadata synchronized", records: currentRecords });
+});
+
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
   const { search, category, sort } = req.query;
@@ -793,17 +912,145 @@ app.get("/api/files/stats", (_req, res) => {
   });
 });
 
-// 3. Upload File(s)
-app.post("/api/files/upload", upload.array("files", 100), (req, res) => {
+// Helper to ensure folder hierarchy exists for folder uploads
+function ensureFolderHierarchy(
+  existingRecords: FileRecord[],
+  baseFolderPath: string,
+  relPath: string,
+  uploadedBy: string,
+  uploadedByRole: 'administrator' | 'normal'
+): { fileFolderPath: string; createdFolders: FileRecord[] } {
+  const createdFolders: FileRecord[] = [];
+  const parts = relPath.split(/[/\\]/).filter(Boolean);
+
+  if (parts.length <= 1) {
+    return { fileFolderPath: baseFolderPath, createdFolders };
+  }
+
+  const dirParts = parts.slice(0, -1);
+  let accumulatedPath = baseFolderPath;
+
+  for (let i = 0; i < dirParts.length; i++) {
+    const dirName = dirParts[i];
+    const parentPath = accumulatedPath;
+    const fullFolderPath = parentPath ? `${parentPath}/${dirName}` : dirName;
+
+    const existsInMeta = existingRecords.some(
+      (r) => r.isFolder && (r.folderPath || "") === parentPath && r.originalName === dirName
+    );
+    const existsInNew = createdFolders.some(
+      (r) => r.isFolder && (r.folderPath || "") === parentPath && r.originalName === dirName
+    );
+
+    if (!existsInMeta && !existsInNew) {
+      const folderRecord: FileRecord = {
+        id: `folder-${crypto.randomUUID()}`,
+        originalName: dirName,
+        filename: "",
+        size: 0,
+        mimeType: "inode/directory",
+        uploadDate: new Date().toISOString(),
+        category: "folder",
+        tags: ["folder"],
+        description: "Uploaded folder container",
+        downloadCount: 0,
+        uploadedBy,
+        uploadedByRole,
+        isFolder: true,
+        folderPath: parentPath,
+      };
+      createdFolders.push(folderRecord);
+    }
+
+    accumulatedPath = fullFolderPath;
+  }
+
+  return { fileFolderPath: accumulatedPath, createdFolders };
+}
+
+// Create Custom Folder
+app.post("/api/folders/create", (req, res) => {
+  const { name, parentPath = "" } = req.body;
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return res.status(400).json({ error: "Folder name is required" });
+  }
+
+  const cleanName = name.trim().replace(/[\/\\]/g, "_");
+  const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
+  const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
+
+  const folderPath = parentPath ? parentPath.trim() : "";
+  const existingRecords = getMetadata();
+
+  const exists = existingRecords.some(
+    (r) => r.isFolder && (r.folderPath || "") === folderPath && r.originalName.toLowerCase() === cleanName.toLowerCase()
+  );
+
+  if (exists) {
+    return res.status(400).json({ error: "A folder with this name already exists in this location" });
+  }
+
+  const folderRecord: FileRecord = {
+    id: `folder-${crypto.randomUUID()}`,
+    originalName: cleanName,
+    filename: "",
+    size: 0,
+    mimeType: "inode/directory",
+    uploadDate: new Date().toISOString(),
+    category: "folder",
+    tags: ["folder"],
+    description: "User created folder",
+    downloadCount: 0,
+    uploadedBy,
+    uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+    isFolder: true,
+    folderPath,
+  };
+
+  saveMetadata([folderRecord, ...existingRecords]);
+  res.status(201).json({ message: "Folder created successfully", folder: folderRecord });
+});
+
+// 3. Upload File(s) or Folder(s)
+app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: "No files uploaded" });
   }
 
+  const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
+  const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
+  const baseFolderPath = (req.body.folderPath as string) || "";
+
+  let relativePaths: string[] = [];
+  if (req.body.relativePaths) {
+    try {
+      relativePaths = typeof req.body.relativePaths === "string" ? JSON.parse(req.body.relativePaths) : req.body.relativePaths;
+    } catch (e) {
+      if (Array.isArray(req.body.relativePaths)) {
+        relativePaths = req.body.relativePaths;
+      }
+    }
+  }
+
   const existingRecords = getMetadata();
   const newRecords: FileRecord[] = [];
+  const newlyCreatedFolders: FileRecord[] = [];
 
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const relPath = relativePaths[i] || file.originalname;
+
+    const { fileFolderPath, createdFolders } = ensureFolderHierarchy(
+      [...existingRecords, ...newlyCreatedFolders],
+      baseFolderPath,
+      relPath,
+      uploadedBy,
+      (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal"
+    );
+
+    newlyCreatedFolders.push(...createdFolders);
+
     const category = detectCategory(file.mimetype || "application/octet-stream", file.originalname);
     const record: FileRecord = {
       id: crypto.randomUUID(),
@@ -816,25 +1063,33 @@ app.post("/api/files/upload", upload.array("files", 100), (req, res) => {
       tags: [],
       description: "",
       downloadCount: 0,
+      uploadedBy,
+      uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+      folderPath: fileFolderPath,
+      relativePath: relPath,
     };
     newRecords.push(record);
   }
 
-  const updatedRecords = [...newRecords, ...existingRecords];
+  const updatedRecords = [...newRecords, ...newlyCreatedFolders, ...existingRecords];
   saveMetadata(updatedRecords);
 
   res.status(201).json({
     message: `${newRecords.length} file(s) uploaded successfully`,
     uploadedFiles: newRecords,
+    createdFolders: newlyCreatedFolders,
   });
 });
 
 // 4. Create Direct Text Note / Snippet file
 app.post("/api/files/create-text", (req, res) => {
-  const { title, content, extension = "txt", description = "" } = req.body;
+  const { title, content, extension = "txt", description = "", folderPath = "" } = req.body;
   if (!title || typeof content !== "string") {
     return res.status(400).json({ error: "Title and content are required" });
   }
+
+  const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
+  const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
 
   const cleanTitle = title.endsWith(`.${extension}`) ? title : `${title}.${extension}`;
   const filename = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extension}`;
@@ -855,6 +1110,9 @@ app.post("/api/files/create-text", (req, res) => {
     tags: ["text-note"],
     description,
     downloadCount: 0,
+    uploadedBy,
+    uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+    folderPath,
   };
 
   const existingRecords = getMetadata();
@@ -863,20 +1121,130 @@ app.post("/api/files/create-text", (req, res) => {
   res.status(201).json({ message: "File created successfully", file: record });
 });
 
-// 5. Download File by ID
-app.get("/api/files/:id/download", (req, res) => {
+// Bulk Download ZIP Archive
+app.post("/api/files/bulk-download-zip", async (req, res) => {
+  const { ids, folderPath } = req.body;
+  const records = getMetadata();
+  let filesToZip: FileRecord[] = [];
+
+  if (Array.isArray(ids) && ids.length > 0) {
+    const directRecords = records.filter((r) => ids.includes(r.id));
+    for (const rec of directRecords) {
+      if (rec.isFolder) {
+        const folderFullPath = rec.folderPath ? `${rec.folderPath}/${rec.originalName}` : rec.originalName;
+        const subFiles = records.filter(
+          (r) => !r.isFolder && ((r.folderPath || "") === folderFullPath || (r.folderPath || "").startsWith(folderFullPath + "/"))
+        );
+        filesToZip.push(...subFiles);
+      } else {
+        filesToZip.push(rec);
+      }
+    }
+  } else if (folderPath !== undefined) {
+    const targetPath = folderPath;
+    filesToZip = records.filter(
+      (r) => !r.isFolder && ((r.folderPath || "") === targetPath || (r.folderPath || "").startsWith(targetPath ? targetPath + "/" : ""))
+    );
+  } else {
+    return res.status(400).json({ error: "No files or folder specified" });
+  }
+
+  // Deduplicate
+  filesToZip = filesToZip.filter((file, idx, self) => self.findIndex((f) => f.id === file.id) === idx);
+
+  if (filesToZip.length === 0) {
+    return res.status(404).json({ error: "No files found to archive" });
+  }
+
+  try {
+    const zip = new JSZip();
+
+    for (const record of filesToZip) {
+      const filePath = path.join(UPLOADS_DIR, record.filename);
+      if (fs.existsSync(filePath)) {
+        const fileBuffer = fs.readFileSync(filePath);
+        let entryPath = record.originalName;
+        if (record.folderPath) {
+          entryPath = `${record.folderPath}/${record.originalName}`;
+        }
+        zip.file(entryPath, fileBuffer);
+      }
+    }
+
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="FileVault_Export_${timestamp}.zip"`);
+    res.setHeader("Content-Length", zipBuffer.length);
+    res.send(zipBuffer);
+  } catch (err: any) {
+    console.error("ZIP Generation Error:", err);
+    res.status(500).json({ error: "Failed to generate ZIP archive" });
+  }
+});
+
+// 5. Download File or Folder by ID
+app.get("/api/files/:id/download", async (req, res) => {
   const { id } = req.params;
   const records = getMetadata();
   const recordIndex = records.findIndex((r) => r.id === id);
 
   if (recordIndex === -1) {
-    return res.status(404).json({ error: "File not found" });
+    return res.status(404).json({ error: "File or folder not found" });
   }
 
   const record = records[recordIndex];
+
+  // If this item is a folder, create a ZIP archive of all contained files
+  if (record.isFolder || record.category === "folder" || !record.filename) {
+    const folderFullPath = record.folderPath ? `${record.folderPath}/${record.originalName}` : record.originalName;
+    const subFiles = records.filter(
+      (r) => !r.isFolder && ((r.folderPath || "") === folderFullPath || (r.folderPath || "").startsWith(folderFullPath + "/"))
+    );
+
+    try {
+      const zip = new JSZip();
+      let addedAny = false;
+
+      for (const subRecord of subFiles) {
+        if (subRecord.filename) {
+          const filePath = path.join(UPLOADS_DIR, subRecord.filename);
+          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            const fileBuffer = fs.readFileSync(filePath);
+            let relInFolder = subRecord.folderPath ? subRecord.folderPath.slice(folderFullPath.length).replace(/^\//, "") : "";
+            let zipEntryPath = relInFolder
+              ? `${record.originalName}/${relInFolder}/${subRecord.originalName}`
+              : `${record.originalName}/${subRecord.originalName}`;
+            zip.file(zipEntryPath, fileBuffer);
+            addedAny = true;
+          }
+        }
+      }
+
+      if (!addedAny) {
+        zip.file(`${record.originalName}/.keep`, "Empty Folder Archive");
+      }
+
+      const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+
+      // Increment download count
+      records[recordIndex].downloadCount += 1;
+      saveMetadata(records);
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(record.originalName)}.zip"`);
+      res.setHeader("Content-Length", zipBuffer.length);
+      return res.send(zipBuffer);
+    } catch (err: any) {
+      console.error("Folder ZIP download error:", err);
+      return res.status(500).json({ error: "Failed to create ZIP for folder" });
+    }
+  }
+
   const filePath = path.join(UPLOADS_DIR, record.filename);
 
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return res.status(404).json({ error: "Physical file missing on server" });
   }
 
@@ -901,8 +1269,12 @@ app.get("/api/files/:id/view", (req, res) => {
     return res.status(404).send("File not found");
   }
 
+  if (record.isFolder || record.category === "folder" || !record.filename) {
+    return res.status(400).send("Folders cannot be viewed directly as inline files");
+  }
+
   const filePath = path.join(UPLOADS_DIR, record.filename);
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return res.status(404).send("File missing on server");
   }
 
@@ -922,8 +1294,12 @@ app.get("/api/files/:id/content", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
+  if (record.isFolder || record.category === "folder" || !record.filename) {
+    return res.status(400).json({ error: "Folders cannot be viewed as text content" });
+  }
+
   const filePath = path.join(UPLOADS_DIR, record.filename);
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return res.status(404).json({ error: "File missing on server" });
   }
 
@@ -967,58 +1343,108 @@ app.put("/api/files/:id", (req, res) => {
   res.json({ message: "File metadata updated", file: records[index] });
 });
 
-// 9. Delete File
+// 9. Delete File or Folder
 app.delete("/api/files/:id", (req, res) => {
   const { id } = req.params;
-  const records = getMetadata();
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  let records = getMetadata();
   const record = records.find((r) => r.id === id);
 
-  if (record) {
-    const filePath = path.join(UPLOADS_DIR, record.filename);
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (err) {
-        console.error("Error deleting physical file:", err);
+  if (!record) {
+    return res.status(404).json({ error: "File or folder not found" });
+  }
+
+  // Check if item was created by administrator and requester is normal user
+  if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
+    return res.status(403).json({
+      error: "This item was created by an Administrator and cannot be deleted by normal users.",
+    });
+  }
+
+  let idsToDelete = [record.id];
+
+  if (record.isFolder) {
+    const folderFullPath = record.folderPath ? `${record.folderPath}/${record.originalName}` : record.originalName;
+    const subRecords = records.filter(
+      (r) => (r.folderPath || "") === folderFullPath || (r.folderPath || "").startsWith(folderFullPath + "/")
+    );
+    idsToDelete.push(...subRecords.map((r) => r.id));
+  }
+
+  for (const delId of idsToDelete) {
+    const rec = records.find((r) => r.id === delId);
+    if (rec && !rec.isFolder && rec.filename) {
+      const filePath = path.join(UPLOADS_DIR, rec.filename);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (err) {
+          console.error("Error deleting physical file:", err);
+        }
       }
     }
   }
 
-  const remainingRecords = records.filter((r) => r.id !== id);
-  saveMetadata(remainingRecords);
+  const deleteSet = new Set(idsToDelete);
+  records = records.filter((r) => !deleteSet.has(r.id));
+  saveMetadata(records);
 
-  res.json({ message: "File deleted successfully" });
+  res.json({ message: record.isFolder ? "Folder and its contents deleted successfully" : "File deleted successfully" });
 });
 
 // 10. Bulk Delete
 app.post("/api/files/bulk-delete", (req, res) => {
-  const { ids } = req.body;
+  const { ids, userRole } = req.body;
+  const requesterRole = (req.headers["x-user-role"] as string) || userRole || "normal";
+
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: "No file IDs provided" });
   }
 
   let records = getMetadata();
+  const targetRecords = records.filter((r) => ids.includes(r.id));
+
+  // If requester is not admin, filter out admin-uploaded files
+  const allowedToDelete = targetRecords.filter((record) => {
+    if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
+      return false;
+    }
+    return true;
+  });
+
+  if (allowedToDelete.length === 0) {
+    return res.status(403).json({
+      error: "Selected file(s) were uploaded by Administrator and cannot be deleted by normal users.",
+    });
+  }
+
+  const allowedIds = new Set(allowedToDelete.map((r) => r.id));
   let deletedCount = 0;
 
-  for (const id of ids) {
-    const record = records.find((r) => r.id === id);
-    if (record) {
+  for (const record of allowedToDelete) {
+    if (!record.isFolder && record.filename) {
       const filePath = path.join(UPLOADS_DIR, record.filename);
-      if (fs.existsSync(filePath)) {
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         try {
           fs.unlinkSync(filePath);
         } catch (e) {
           console.error(e);
         }
       }
-      deletedCount++;
     }
+    deletedCount++;
   }
 
-  records = records.filter((r) => !ids.includes(r.id));
+  records = records.filter((r) => !allowedIds.has(r.id));
   saveMetadata(records);
 
-  res.json({ message: `${deletedCount} file(s) deleted successfully` });
+  const skippedCount = targetRecords.length - allowedToDelete.length;
+  let msg = `${deletedCount} file(s) deleted successfully.`;
+  if (skippedCount > 0) {
+    msg += ` (${skippedCount} file(s) uploaded by Administrator were protected and skipped)`;
+  }
+
+  res.json({ message: msg });
 });
 
 

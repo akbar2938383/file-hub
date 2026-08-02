@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings } from './types';
 import { Navbar } from './components/Navbar';
 import { StorageSummaryCard } from './components/StorageSummaryCard';
@@ -21,6 +21,25 @@ export default function App() {
   const [stats, setStats] = useState<StorageStats | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Theme State
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('vault_theme');
+      if (saved) return saved === 'dark';
+    } catch (e) {}
+    return true; // Default to dark mode
+  });
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('vault_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('vault_theme', 'light');
+    }
+  }, [isDark]);
 
   // App Navigation & Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -48,9 +67,20 @@ export default function App() {
   // Filters & State
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>('');
   const [sortOption, setSortOption] = useState<SortOption>('date_desc');
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Debounce search term to prevent overloading the server with concurrent calls
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
@@ -78,6 +108,11 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setWallpaperSettings(data);
+        if (data && data.activeWallpaper) {
+          try {
+            localStorage.setItem('vault_wallpaper_backup', JSON.stringify(data));
+          } catch (e) {}
+        }
       }
     } catch (err) {
       console.error('Error fetching wallpaper settings:', err);
@@ -88,7 +123,7 @@ export default function App() {
     fetchWallpaperSettings();
     const interval = setInterval(fetchWallpaperSettings, 3000);
 
-    // Sync persistent user accounts on startup
+    // Sync persistent user accounts, wallpapers, and files on startup
     const rawUsers = localStorage.getItem('vault_persistent_users');
     if (rawUsers) {
       try {
@@ -102,6 +137,38 @@ export default function App() {
         }
       } catch (e) {
         console.error('Error parsing stored persistent users:', e);
+      }
+    }
+
+    const rawWallpaper = localStorage.getItem('vault_wallpaper_backup');
+    if (rawWallpaper) {
+      try {
+        const wp = JSON.parse(rawWallpaper);
+        if (wp && wp.activeWallpaper) {
+          fetch('/api/wallpaper/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(wp),
+          }).catch((err) => console.error('Initial wallpaper sync failed:', err));
+        }
+      } catch (e) {
+        console.error('Error parsing stored wallpaper backup:', e);
+      }
+    }
+
+    const rawFiles = localStorage.getItem('vault_files_backup');
+    if (rawFiles) {
+      try {
+        const cachedFiles = JSON.parse(rawFiles);
+        if (Array.isArray(cachedFiles) && cachedFiles.length > 0) {
+          fetch('/api/files/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: cachedFiles }),
+          }).catch((err) => console.error('Initial files metadata sync failed:', err));
+        }
+      } catch (e) {
+        console.error('Error parsing stored files backup:', e);
       }
     }
 
@@ -142,33 +209,86 @@ export default function App() {
   }, []);
 
   const fetchFiles = useCallback(async () => {
+    // Abort previous in-flight file fetch request if present
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsRefreshing(true);
     try {
       const query = new URLSearchParams();
-      if (searchTerm) query.append('search', searchTerm);
+      if (debouncedSearchTerm) query.append('search', debouncedSearchTerm);
       if (activeCategory !== 'all') query.append('category', activeCategory);
       if (sortOption) query.append('sort', sortOption);
 
-      const res = await fetch(`/api/files?${query.toString()}`);
+      const res = await fetch(`/api/files?${query.toString()}`, {
+        signal: controller.signal,
+      });
+
       if (res.ok) {
         const data = await res.json();
         setFiles(data);
+        if (Array.isArray(data) && data.length > 0) {
+          try {
+            localStorage.setItem('vault_files_backup', JSON.stringify(data));
+          } catch (e) {}
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // Request was cancelled due to a newer request, ignore quietly
+        return;
+      }
       console.error('Error fetching files:', err);
       showToast('Failed to load files from server', 'error');
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [searchTerm, activeCategory, sortOption]);
+  }, [debouncedSearchTerm, activeCategory, sortOption]);
 
   useEffect(() => {
     fetchFiles();
     fetchStats();
   }, [fetchFiles, fetchStats]);
 
-  const handleDownloadFile = (file: FileRecord) => {
+  const handleDownloadFile = async (file: FileRecord) => {
+    if (file.isFolder || file.category === 'folder') {
+      showToast(`Compressing folder "${file.originalName}" into ZIP archive...`, 'success');
+      try {
+        const downloadUrl = `/api/files/${file.id}/download`;
+        const res = await fetch(downloadUrl);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to download folder');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${file.originalName}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        setTimeout(() => {
+          fetchFiles();
+          fetchStats();
+        }, 500);
+
+        showToast(`Downloaded folder "${file.originalName}.zip"`, 'success');
+      } catch (err: any) {
+        showToast(err.message || 'Error downloading folder archive', 'error');
+      }
+      return;
+    }
+
     const downloadUrl = `/api/files/${file.id}/download`;
     const a = document.createElement('a');
     a.href = downloadUrl;
@@ -188,11 +308,23 @@ export default function App() {
 
   const requestSingleDelete = (id: string) => {
     const targetFile = files.find((f) => f.id === id);
+    if (targetFile?.uploadedByRole === 'administrator' && currentUser?.role !== 'administrator') {
+      showToast('This file was uploaded by an Administrator and cannot be deleted by normal users.', 'error');
+      return;
+    }
     setDeleteTarget({ id, name: targetFile ? targetFile.originalName : 'this file' });
   };
 
   const requestBulkDelete = () => {
     if (selectedIds.length === 0) return;
+    if (currentUser?.role !== 'administrator') {
+      const selectedFiles = files.filter((f) => selectedIds.includes(f.id));
+      const adminCount = selectedFiles.filter((f) => f.uploadedByRole === 'administrator').length;
+      if (adminCount === selectedFiles.length) {
+        showToast('Selected file(s) were uploaded by Administrator and cannot be deleted by normal users.', 'error');
+        return;
+      }
+    }
     setDeleteTarget({ bulk: true, name: `${selectedIds.length} selected file(s)` });
   };
 
@@ -203,43 +335,86 @@ export default function App() {
       try {
         const res = await fetch('/api/files/bulk-delete', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: selectedIds }),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-role': currentUser?.role || 'normal',
+          },
+          body: JSON.stringify({ ids: selectedIds, userRole: currentUser?.role || 'normal' }),
         });
 
-        if (!res.ok) throw new Error('Bulk delete failed');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Bulk delete failed');
 
-        showToast(`${selectedIds.length} file(s) deleted successfully`);
+        showToast(data.message || `${selectedIds.length} file(s) deleted successfully`);
         setSelectedIds([]);
         fetchFiles();
         fetchStats();
-      } catch (err) {
-        showToast('Failed to perform bulk delete', 'error');
+      } catch (err: any) {
+        showToast(err.message || 'Failed to perform bulk delete', 'error');
       }
     } else if (deleteTarget.id) {
       try {
-        const res = await fetch(`/api/files/${deleteTarget.id}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Delete failed');
+        const res = await fetch(`/api/files/${deleteTarget.id}`, {
+          method: 'DELETE',
+          headers: {
+            'x-user-role': currentUser?.role || 'normal',
+          },
+        });
 
-        showToast('File deleted successfully');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Delete failed');
+
+        showToast(data.message || 'File deleted successfully');
         setSelectedIds((prev) => prev.filter((i) => i !== deleteTarget.id));
         fetchFiles();
         fetchStats();
-      } catch (err) {
-        showToast('Failed to delete file', 'error');
+      } catch (err: any) {
+        showToast(err.message || 'Failed to delete file', 'error');
       }
     }
   };
 
-  const handleBulkDownload = () => {
-    if (selectedIds.length === 0) return;
-    const selectedFiles = files.filter((f) => selectedIds.includes(f.id));
+  const handleBulkDownload = async (idsToZip?: string[], folderPathToZip?: string) => {
+    const targetIds = idsToZip || selectedIds;
+    if (targetIds.length === 0 && folderPathToZip === undefined) return;
 
-    selectedFiles.forEach((f, idx) => {
-      setTimeout(() => {
-        handleDownloadFile(f);
-      }, idx * 400);
-    });
+    showToast('Bundling selected files into ZIP archive...', 'success');
+
+    try {
+      const res = await fetch('/api/files/bulk-download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids: targetIds,
+          folderPath: folderPathToZip,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to generate ZIP archive');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const contentDisposition = res.headers.get('content-disposition');
+      let filename = 'FileVault_Bundle.zip';
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      showToast('ZIP archive downloaded successfully!', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Error downloading ZIP archive', 'error');
+    }
   };
 
   const activeWallpaper = wallpaperSettings?.activeWallpaper;
@@ -295,6 +470,8 @@ export default function App() {
               fetchWallpaperSettings();
             }}
             isRefreshing={isRefreshing}
+            isDark={isDark}
+            onToggleTheme={() => setIsDark((prev) => !prev)}
           />
 
           {/* Toast Alert */}
@@ -353,6 +530,7 @@ export default function App() {
                   onBulkDownload={handleBulkDownload}
                   onOpenUpload={() => setIsUploadOpen(true)}
                   onQrCode={(f) => setQrCodeFile(f)}
+                  currentUser={currentUser}
                 />
               </main>
             )
@@ -363,6 +541,12 @@ export default function App() {
               <UserControlPage
                 currentUser={currentUser}
                 showToast={showToast}
+                onCurrentUserUpdated={(updatedUser) => {
+                  setCurrentUser(updatedUser);
+                  try {
+                    localStorage.setItem('vault_user', JSON.stringify(updatedUser));
+                  } catch (e) {}
+                }}
               />
             ) : (
               <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -384,6 +568,7 @@ export default function App() {
                   onBulkDownload={handleBulkDownload}
                   onOpenUpload={() => setIsUploadOpen(true)}
                   onQrCode={(f) => setQrCodeFile(f)}
+                  currentUser={currentUser}
                 />
               </main>
             )
@@ -420,6 +605,9 @@ export default function App() {
                   setSelectedIds([]);
                 }}
                 stats={stats}
+                currentUser={currentUser}
+                onRefreshFiles={fetchFiles}
+                showToast={showToast}
               />
 
             </main>
@@ -451,6 +639,7 @@ export default function App() {
       <DropzoneModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
+        currentUser={currentUser}
         onUploadSuccess={() => {
           showToast('Files uploaded successfully');
           fetchFiles();
@@ -461,6 +650,7 @@ export default function App() {
       <CreateTextModal
         isOpen={isCreateTextOpen}
         onClose={() => setIsCreateTextOpen(false)}
+        currentUser={currentUser}
         onCreated={() => {
           showToast('File created successfully');
           fetchFiles();

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { FileRecord, ViewMode } from '../types';
+import { FileRecord, ViewMode, User } from '../types';
 import { formatBytes, formatDate, getCategoryBadgeColor } from '../utils/formatters';
-import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode } from 'lucide-react';
+import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode, ShieldCheck, Lock, Folder, FolderOpen } from 'lucide-react';
 
 interface Props {
   file: FileRecord;
@@ -13,6 +13,8 @@ interface Props {
   onEdit: (file: FileRecord) => void;
   onDelete: (id: string) => void;
   onQrCode?: (file: FileRecord) => void;
+  onOpenFolder?: (folderPath: string) => void;
+  currentUser?: User | null;
 }
 
 export const FileCard: React.FC<Props> = ({
@@ -25,10 +27,28 @@ export const FileCard: React.FC<Props> = ({
   onEdit,
   onDelete,
   onQrCode,
+  onOpenFolder,
+  currentUser,
 }) => {
   const [copied, setCopied] = useState(false);
 
+  const isAdminUploaded = file.uploadedByRole === 'administrator';
+  const isUserAdmin = currentUser?.role === 'administrator';
+  const isProtected = isAdminUploaded && !isUserAdmin;
+
+  const isFolder = file.isFolder === true || file.category === 'folder';
+  const folderTargetPath = file.folderPath ? `${file.folderPath}/${file.originalName}` : file.originalName;
+
+  const handleCardClick = () => {
+    if (isFolder && onOpenFolder) {
+      onOpenFolder(folderTargetPath);
+    } else {
+      onPreview(file);
+    }
+  };
+
   const getCategoryIcon = (category: string) => {
+    if (isFolder) return Folder;
     switch (category) {
       case 'image': return Image;
       case 'video': return Film;
@@ -66,7 +86,9 @@ export const FileCard: React.FC<Props> = ({
           />
 
           <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
-            {file.category === 'image' ? (
+            {isFolder ? (
+              <FolderOpen className="w-5 h-5 text-amber-500 dark:text-amber-400" />
+            ) : file.category === 'image' ? (
               <img
                 src={directViewUrl}
                 alt={file.originalName}
@@ -81,21 +103,37 @@ export const FileCard: React.FC<Props> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span
-                onClick={() => onPreview(file)}
+                onClick={handleCardClick}
                 className="font-medium text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer truncate"
               >
                 {file.originalName}
               </span>
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border capitalize shrink-0 ${badgeClass}`}>
-                {file.category}
+                {isFolder ? 'Folder' : file.category}
               </span>
+              {isAdminUploaded && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>Admin</span>
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-              <span>{formatBytes(file.size)}</span>
-              <span>•</span>
-              <span>{formatDate(file.uploadDate)}</span>
-              <span>•</span>
-              <span>{file.downloadCount} download{file.downloadCount === 1 ? '' : 's'}</span>
+              {isFolder ? (
+                <>
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">{file.itemCount || 0} item{(file.itemCount || 0) === 1 ? '' : 's'}</span>
+                  <span>•</span>
+                  <span>{formatDate(file.uploadDate)}</span>
+                </>
+              ) : (
+                <>
+                  <span>{formatBytes(file.size)}</span>
+                  <span>•</span>
+                  <span>{formatDate(file.uploadDate)}</span>
+                  <span>•</span>
+                  <span>{file.downloadCount} download{file.downloadCount === 1 ? '' : 's'}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -155,10 +193,14 @@ export const FileCard: React.FC<Props> = ({
           <button
             id={`delete-file-${file.id}`}
             onClick={() => onDelete(file.id)}
-            title="Delete file"
-            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors"
+            title={isProtected ? "Protected: Uploaded by Administrator" : "Delete file"}
+            className={`p-2 rounded-lg transition-colors ${
+              isProtected
+                ? 'text-amber-500 hover:bg-amber-500/10 cursor-not-allowed'
+                : 'text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40'
+            }`}
           >
-            <Trash2 className="w-4 h-4" />
+            {isProtected ? <Lock className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -179,17 +221,30 @@ export const FileCard: React.FC<Props> = ({
           onChange={() => onToggleSelect(file.id)}
           className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
         />
-        <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-semibold border capitalize ${badgeClass}`}>
-          {file.category}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {isAdminUploaded && (
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
+              <ShieldCheck className="w-3 h-3" />
+              <span>Admin</span>
+            </span>
+          )}
+          <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-semibold border capitalize ${badgeClass}`}>
+            {isFolder ? 'Folder' : file.category}
+          </span>
+        </div>
       </div>
 
       {/* Thumbnail or Category Icon */}
       <div
-        onClick={() => onPreview(file)}
+        onClick={handleCardClick}
         className="w-full h-36 bg-slate-50 dark:bg-slate-800/60 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer border border-slate-100 dark:border-slate-800 mb-3 group-hover:scale-[1.01] transition-transform"
       >
-        {file.category === 'image' ? (
+        {isFolder ? (
+          <div className="p-4 bg-amber-500/10 text-amber-500 rounded-2xl flex flex-col items-center justify-center gap-1">
+            <FolderOpen className="w-10 h-10" />
+            <span className="text-[11px] font-bold">Open Folder</span>
+          </div>
+        ) : file.category === 'image' ? (
           <img
             src={directViewUrl}
             alt={file.originalName}
@@ -206,15 +261,15 @@ export const FileCard: React.FC<Props> = ({
       {/* File Info */}
       <div className="mb-3">
         <h4
-          onClick={() => onPreview(file)}
+          onClick={handleCardClick}
           className="font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer truncate mb-1"
           title={file.originalName}
         >
           {file.originalName}
         </h4>
         <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>{formatBytes(file.size)}</span>
-          <span>{file.downloadCount} dl</span>
+          <span>{isFolder ? `${file.itemCount || 0} item(s)` : formatBytes(file.size)}</span>
+          <span>{isFolder ? 'Folder' : `${file.downloadCount} dl`}</span>
         </div>
       </div>
 
@@ -270,10 +325,14 @@ export const FileCard: React.FC<Props> = ({
           <button
             id={`grid-delete-${file.id}`}
             onClick={() => onDelete(file.id)}
-            title="Delete"
-            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
+            title={isProtected ? "Protected: Uploaded by Administrator" : "Delete"}
+            className={`p-1.5 rounded-md transition-colors ${
+              isProtected
+                ? 'text-amber-500 hover:bg-amber-500/10 cursor-not-allowed'
+                : 'text-slate-400 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
           >
-            <Trash2 className="w-4 h-4" />
+            {isProtected ? <Lock className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
           </button>
         </div>
       </div>

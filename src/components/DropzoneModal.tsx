@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, X, File, Folder, CheckCircle2, AlertCircle, Loader2, FolderPlus, Zap, StopCircle, Image as ImageIcon } from 'lucide-react';
 import { formatBytes } from '../utils/formatters';
+import { User } from '../types';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onUploadSuccess: () => void;
+  currentUser?: User | null;
+  currentFolderPath?: string;
 }
 
 interface QueuedFile {
@@ -17,7 +20,7 @@ interface QueuedFile {
   errorMessage?: string;
 }
 
-export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSuccess }) => {
+export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSuccess, currentUser, currentFolderPath = '' }) => {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -58,12 +61,89 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const traverseFileTree = async (item: any, path = ''): Promise<{ file: File; relativePath: string }[]> => {
+    if (item.isFile) {
+      return new Promise((resolve) => {
+        item.file((file: File) => {
+          resolve([{ file, relativePath: path + file.name }]);
+        });
+      });
+    } else if (item.isDirectory) {
+      const dirReader = item.createReader();
+      const entries: any[] = await new Promise((resolve) => {
+        dirReader.readEntries((result: any[]) => resolve(result));
+      });
+      const filesArrays = await Promise.all(
+        entries.map((entry) => traverseFileTree(entry, path + item.name + '/'))
+      );
+      return filesArrays.flat();
+    }
+    return [];
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+
+    const items = e.dataTransfer.items;
+    if (items && items.length > 0) {
+      const fileEntries: { file: File; relativePath: string }[] = [];
+      const promises: Promise<any>[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+          if (entry) {
+            promises.push(
+              traverseFileTree(entry).then((extracted) => {
+                fileEntries.push(...extracted);
+              })
+            );
+          }
+        }
+      }
+
+      if (promises.length > 0) {
+        await Promise.all(promises);
+        if (fileEntries.length > 0) {
+          addFilesWithPaths(fileEntries);
+          return;
+        }
+      }
+    }
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       addFiles(Array.from(e.dataTransfer.files));
     }
+  };
+
+  const addFilesWithPaths = (items: { file: File; relativePath: string }[]) => {
+    setErrorMessage(null);
+    const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
+
+    const newItems: QueuedFile[] = items.map(({ file, relativePath }) => {
+      let previewUrl: string | undefined = undefined;
+      if (file.type.startsWith('image/') && file.size <= 10 * 1024 * 1024) {
+        previewUrl = URL.createObjectURL(file);
+      }
+      const isTooLarge = file.size > MAX_SIZE;
+
+      return {
+        id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+        file,
+        relativePath,
+        previewUrl,
+        status: isTooLarge ? 'error' : 'pending',
+        errorMessage: isTooLarge ? 'File exceeds 500 MB limit' : undefined,
+      };
+    });
+
+    setQueuedFiles((prev) => {
+      const existingKeys = new Set(prev.map((item) => `${item.relativePath || item.file.name}-${item.file.size}`));
+      const filteredNew = newItems.filter((item) => !existingKeys.has(`${item.relativePath || item.file.name}-${item.file.size}`));
+      return [...prev, ...filteredNew];
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -130,9 +210,9 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
     setErrorMessage('Upload cancelled by user.');
   };
 
-  // Optimized Batch Upload Engine with XHR Progress & Speed Stats
+  // Optimized Micro-Batch Upload Engine with XHR Progress, Speed Stats & Auto-Retry
   const handleStartUpload = async () => {
-    const validFiles = queuedFiles.filter((q) => q.status !== 'error');
+    const validFiles = queuedFiles.filter((q) => q.status !== 'error' && q.status !== 'completed');
     if (validFiles.length === 0) return;
 
     setIsUploading(true);
@@ -143,92 +223,171 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
     setTotalBytes(totalBatchBytes);
     setBytesUploaded(0);
 
-    // Split files into optimal batches of 25 files
-    const BATCH_SIZE = 25;
+    // Create micro-batches: max 2 files OR max 8 MB per request to prevent proxy timeouts or body limits
+    const MAX_FILES_PER_BATCH = 2;
+    const MAX_BYTES_PER_BATCH = 8 * 1024 * 1024; // 8 MB
+
     const batches: QueuedFile[][] = [];
-    for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
-      batches.push(validFiles.slice(i, i + BATCH_SIZE));
+    let currentMicroBatch: QueuedFile[] = [];
+    let currentBatchSize = 0;
+
+    for (const item of validFiles) {
+      if (
+        currentMicroBatch.length > 0 &&
+        (currentMicroBatch.length >= MAX_FILES_PER_BATCH || currentBatchSize + item.file.size > MAX_BYTES_PER_BATCH)
+      ) {
+        batches.push(currentMicroBatch);
+        currentMicroBatch = [];
+        currentBatchSize = 0;
+      }
+      currentMicroBatch.push(item);
+      currentBatchSize += item.file.size;
+    }
+    if (currentMicroBatch.length > 0) {
+      batches.push(currentMicroBatch);
     }
 
     let overallUploadedBytes = 0;
     const startTime = Date.now();
+    let successCount = 0;
+    let failCount = 0;
 
     try {
       for (let bIndex = 0; bIndex < batches.length; bIndex++) {
         const batch = batches[bIndex];
-        const formData = new FormData();
-        batch.forEach((item) => {
-          formData.append('files', item.file);
-        });
+        const batchIds = new Set(batch.map((b) => b.id));
 
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          currentXhrRef.current = xhr;
+        // Mark batch as uploading
+        setQueuedFiles((prev) =>
+          prev.map((item) => (batchIds.has(item.id) ? { ...item, status: 'uploading' } : item))
+        );
 
-          xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-              const currentBatchBytes = e.loaded;
-              const currentTotalUploaded = overallUploadedBytes + currentBatchBytes;
-              setBytesUploaded(currentTotalUploaded);
+        // Upload single micro-batch with auto-retry
+        let attempts = 0;
+        const maxAttempts = 3;
+        let batchSuccess = false;
 
-              const percentage = Math.min(100, Math.round((currentTotalUploaded / totalBatchBytes) * 100));
-              setUploadProgress(percentage);
+        while (attempts < maxAttempts && !batchSuccess) {
+          attempts++;
+          try {
+            const formData = new FormData();
+            if (currentFolderPath) {
+              formData.append('folderPath', currentFolderPath);
+            }
+            const relPaths = batch.map((item) => item.relativePath || item.file.name);
+            formData.append('relativePaths', JSON.stringify(relPaths));
+            batch.forEach((item) => {
+              formData.append('files', item.file);
+            });
 
-              // Calculate speed & ETA
-              const elapsedTime = (Date.now() - startTime) / 1000; // seconds
-              if (elapsedTime > 0.3) {
-                const speedBytesPerSec = currentTotalUploaded / elapsedTime;
-                setUploadSpeed(`${formatBytes(speedBytesPerSec)}/s`);
+            await new Promise<void>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              currentXhrRef.current = xhr;
 
-                const remainingBytes = totalBatchBytes - currentTotalUploaded;
-                const remainingSecs = Math.ceil(remainingBytes / speedBytesPerSec);
-                if (remainingSecs > 60) {
-                  setEstimatedTimeLeft(`${Math.ceil(remainingSecs / 60)} min remaining`);
-                } else {
-                  setEstimatedTimeLeft(`${remainingSecs}s remaining`);
+              xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                  const currentBatchBytes = e.loaded;
+                  const currentTotalUploaded = overallUploadedBytes + currentBatchBytes;
+                  setBytesUploaded(currentTotalUploaded);
+
+                  const percentage = Math.min(100, Math.round((currentTotalUploaded / totalBatchBytes) * 100));
+                  setUploadProgress(percentage);
+
+                  // Calculate speed & ETA
+                  const elapsedTime = (Date.now() - startTime) / 1000;
+                  if (elapsedTime > 0.3) {
+                    const speedBytesPerSec = currentTotalUploaded / elapsedTime;
+                    setUploadSpeed(`${formatBytes(speedBytesPerSec)}/s`);
+
+                    const remainingBytes = Math.max(0, totalBatchBytes - currentTotalUploaded);
+                    const remainingSecs = Math.ceil(remainingBytes / speedBytesPerSec);
+                    if (remainingSecs > 60) {
+                      setEstimatedTimeLeft(`${Math.ceil(remainingSecs / 60)} min remaining`);
+                    } else {
+                      setEstimatedTimeLeft(`${remainingSecs}s remaining`);
+                    }
+                  }
                 }
-              }
-            }
-          });
+              });
 
-          xhr.addEventListener('load', () => {
-            currentXhrRef.current = null;
-            if (xhr.status >= 200 && xhr.status < 300) {
-              overallUploadedBytes += batch.reduce((acc, item) => acc + item.file.size, 0);
-              resolve();
+              xhr.addEventListener('load', () => {
+                currentXhrRef.current = null;
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  batchSuccess = true;
+                  resolve();
+                } else {
+                  try {
+                    const res = JSON.parse(xhr.responseText);
+                    reject(new Error(res.error || `Upload HTTP error ${xhr.status}`));
+                  } catch {
+                    reject(new Error(`Server response error (${xhr.status})`));
+                  }
+                }
+              });
+
+              xhr.addEventListener('error', () => {
+                currentXhrRef.current = null;
+                reject(new Error('Network drop during upload'));
+              });
+
+              xhr.addEventListener('abort', () => {
+                currentXhrRef.current = null;
+                reject(new Error('Upload cancelled'));
+              });
+
+              xhr.open('POST', '/api/files/upload');
+              if (currentUser) {
+                xhr.setRequestHeader('x-username', currentUser.username);
+                xhr.setRequestHeader('x-user-role', currentUser.role);
+              }
+              xhr.send(formData);
+            });
+          } catch (batchErr: any) {
+            if (batchErr.message === 'Upload cancelled') {
+              throw batchErr;
+            }
+            if (attempts >= maxAttempts) {
+              console.error(`Micro-batch ${bIndex + 1} failed after ${maxAttempts} attempts:`, batchErr);
             } else {
-              try {
-                const res = JSON.parse(xhr.responseText);
-                reject(new Error(res.error || `Upload failed with status ${xhr.status}`));
-              } catch {
-                reject(new Error(`Server error (${xhr.status}) during upload`));
-              }
+              // Wait 400ms before retrying
+              await new Promise((r) => setTimeout(r, 400));
             }
-          });
+          }
+        }
 
-          xhr.addEventListener('error', () => {
-            currentXhrRef.current = null;
-            reject(new Error('Network error during upload'));
-          });
+        if (batchSuccess) {
+          const batchBytes = batch.reduce((acc, item) => acc + item.file.size, 0);
+          overallUploadedBytes += batchBytes;
+          successCount += batch.length;
 
-          xhr.addEventListener('abort', () => {
-            currentXhrRef.current = null;
-            reject(new Error('Upload cancelled'));
-          });
-
-          xhr.open('POST', '/api/files/upload');
-          xhr.send(formData);
-        });
+          // Mark items as completed
+          setQueuedFiles((prev) =>
+            prev.map((item) => (batchIds.has(item.id) ? { ...item, status: 'completed' } : item))
+          );
+        } else {
+          failCount += batch.length;
+          setQueuedFiles((prev) =>
+            prev.map((item) =>
+              batchIds.has(item.id) ? { ...item, status: 'error', errorMessage: 'Upload failed after retries' } : item
+            )
+          );
+        }
       }
 
       setUploadProgress(100);
-      setTimeout(() => {
+      onUploadSuccess();
+
+      if (failCount === 0) {
+        setTimeout(() => {
+          setIsUploading(false);
+          setQueuedFiles([]);
+          setUploadProgress(0);
+          onClose();
+        }, 600);
+      } else {
         setIsUploading(false);
-        setQueuedFiles([]);
-        setUploadProgress(0);
-        onUploadSuccess();
-        onClose();
-      }, 400);
+        setErrorMessage(`Uploaded ${successCount} file(s) successfully. ${failCount} file(s) encountered errors.`);
+      }
 
     } catch (err: unknown) {
       setIsUploading(false);

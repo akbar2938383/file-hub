@@ -1,7 +1,7 @@
-import React from 'react';
-import { FileRecord, ViewMode, SortOption, StorageStats } from '../types';
+import React, { useState } from 'react';
+import { FileRecord, ViewMode, SortOption, StorageStats, User } from '../types';
 import { FileCard } from './FileCard';
-import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter } from 'lucide-react';
+import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2 } from 'lucide-react';
 
 interface Props {
   files: FileRecord[];
@@ -24,6 +24,9 @@ interface Props {
   activeCategory?: string;
   onSelectCategory?: (cat: string) => void;
   stats?: StorageStats | null;
+  currentUser?: User | null;
+  onRefreshFiles?: () => void;
+  showToast?: (msg: string, type?: 'success' | 'error') => void;
 }
 
 export const FileList: React.FC<Props> = ({
@@ -47,8 +50,56 @@ export const FileList: React.FC<Props> = ({
   activeCategory = 'all',
   onSelectCategory,
   stats,
+  currentUser,
+  onRefreshFiles,
+  showToast,
 }) => {
-  const allSelected = files.length > 0 && selectedIds.length === files.length;
+  const [currentFolderPath, setCurrentFolderPath] = useState<string>('');
+  const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+
+  // Filter files by current folder level if search term is empty
+  const displayedFiles = searchTerm.trim()
+    ? files
+    : files.filter((f) => {
+        const itemFolder = f.folderPath || '';
+        return itemFolder === currentFolderPath;
+      });
+
+  const allSelected = displayedFiles.length > 0 && selectedIds.length === displayedFiles.length;
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+
+    setIsCreatingFolder(true);
+    try {
+      const res = await fetch('/api/folders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newFolderName.trim(),
+          parentFolderPath: currentFolderPath,
+          uploadedByRole: currentUser?.role || 'normal',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create folder');
+
+      showToast?.(data.message || 'Folder created successfully!', 'success');
+      setNewFolderName('');
+      setIsCreateFolderOpen(false);
+      onRefreshFiles?.();
+    } catch (err: any) {
+      showToast?.(err.message || 'Error creating folder', 'error');
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
+  const breadcrumbs = currentFolderPath ? currentFolderPath.split('/').filter(Boolean) : [];
 
   const categories = [
     { key: 'all', label: 'All Files', icon: Layers, count: stats?.totalFiles ?? files.length },
@@ -164,12 +215,49 @@ export const FileList: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* Folder Breadcrumbs Navigation */}
+        <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 text-xs overflow-x-auto">
+          <button
+            onClick={() => setCurrentFolderPath('')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors font-medium ${
+              currentFolderPath === ''
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Root Vault</span>
+          </button>
+
+          {breadcrumbs.map((crumb, idx) => {
+            const subPath = breadcrumbs.slice(0, idx + 1).join('/');
+            const isLast = idx === breadcrumbs.length - 1;
+
+            return (
+              <React.Fragment key={subPath}>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <button
+                  onClick={() => setCurrentFolderPath(subPath)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors font-medium truncate max-w-[150px] ${
+                    isLast
+                      ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="truncate">{crumb}</span>
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
 
 
       </div>
 
       {/* Bulk Selection Bar */}
-      {files.length > 0 && (
+      {displayedFiles.length > 0 && (
         <div className="flex items-center justify-between px-2 py-1 text-xs text-slate-500 dark:text-slate-400">
           <button
             id="select-all-files"
@@ -177,7 +265,7 @@ export const FileList: React.FC<Props> = ({
             className="flex items-center gap-2 hover:text-slate-900 dark:hover:text-slate-200 font-medium transition-colors"
           >
             {allSelected ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4" />}
-            <span>Select All ({files.length})</span>
+            <span>Select All ({displayedFiles.length})</span>
           </button>
 
           {selectedIds.length > 0 && (
@@ -192,7 +280,7 @@ export const FileList: React.FC<Props> = ({
                 className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Download Selected</span>
+                <span>Bundle ZIP Download</span>
               </button>
 
               <button
@@ -209,32 +297,43 @@ export const FileList: React.FC<Props> = ({
       )}
 
       {/* Empty State */}
-      {files.length === 0 && (
+      {displayedFiles.length === 0 && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center justify-center">
-          <div className="w-16 h-16 bg-blue-500/10 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+          <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mb-4">
             <FolderOpen className="w-8 h-8" />
           </div>
           <h3 className="font-semibold text-lg text-slate-900 dark:text-slate-100 mb-1">
-            No files found
+            {currentFolderPath ? `Folder "${currentFolderPath}" is empty` : 'No files or folders found'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mb-6">
-            {searchTerm ? `No files match "${searchTerm}"` : 'Your vault is empty. Upload files or create a text file to get started.'}
+            {searchTerm
+              ? `No files match "${searchTerm}"`
+              : 'This directory is currently empty. Upload files or create new subfolders to organize your vault.'}
           </p>
-          <button
-            id="empty-upload-btn"
-            onClick={onOpenUpload}
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl shadow-sm transition-colors flex items-center gap-2"
-          >
-            <Download className="w-4 h-4 rotate-180" />
-            <span>Upload Your First File</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsCreateFolderOpen(true)}
+              className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5"
+            >
+              <FolderPlus className="w-4 h-4" />
+              <span>Create Folder</span>
+            </button>
+            <button
+              id="empty-upload-btn"
+              onClick={onOpenUpload}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl shadow-sm transition-colors flex items-center gap-2"
+            >
+              <Download className="w-4 h-4 rotate-180" />
+              <span>Upload Files Here</span>
+            </button>
+          </div>
         </div>
       )}
 
       {/* File List Grid or List */}
-      {files.length > 0 && (
+      {displayedFiles.length > 0 && (
         <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4' : 'space-y-2.5'}>
-          {files.map((file) => (
+          {displayedFiles.map((file) => (
             <FileCard
               key={file.id}
               file={file}
@@ -246,8 +345,79 @@ export const FileList: React.FC<Props> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               onQrCode={onQrCode}
+              onOpenFolder={(targetFolder) => setCurrentFolderPath(targetFolder)}
+              currentUser={currentUser}
             />
           ))}
+        </div>
+      )}
+
+      {/* Create Folder Modal */}
+      {isCreateFolderOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-amber-500/10 text-amber-600 rounded-2xl">
+                  <FolderPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
+                    Create New Folder
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Location: {currentFolderPath ? `/${currentFolderPath}` : '/ (Root)'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCreateFolderOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFolder} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Folder Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="e.g. Invoices, Project Files, Photos"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateFolderOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingFolder || !newFolderName.trim()}
+                  className="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-md transition-colors flex items-center gap-2"
+                >
+                  {isCreatingFolder ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Create Folder</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

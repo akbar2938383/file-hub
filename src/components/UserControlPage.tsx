@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { Users, UserPlus, ShieldCheck, UserCheck, Trash2, Edit3, Key, Lock, CheckCircle2, AlertCircle, X, ShieldAlert, Sparkles, Clock } from 'lucide-react';
+import { Users, UserPlus, ShieldCheck, UserCheck, Trash2, Edit3, Key, Lock, CheckCircle2, AlertCircle, X, ShieldAlert, Sparkles, Clock, Camera } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { PfpChangerModal } from './PfpChangerModal';
 
 interface Props {
   currentUser: User | null;
   showToast: (msg: string, type?: 'success' | 'error') => void;
+  onCurrentUserUpdated?: (user: User) => void;
 }
 
-export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => {
+export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCurrentUserUpdated }) => {
   const isAdmin = currentUser?.role === 'administrator';
 
   const [users, setUsers] = useState<User[]>([]);
@@ -26,6 +28,9 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
   const [editFullName, setEditFullName] = useState('');
   const [editRole, setEditRole] = useState<'administrator' | 'normal'>('normal');
   const [editPassword, setEditPassword] = useState('');
+
+  // PFP Changer Modal State
+  const [pfpTargetUser, setPfpTargetUser] = useState<User | null>(null);
 
   // Delete User Confirmation Modal
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
@@ -256,11 +261,28 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
                 <div>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={u.avatar}
-                        alt={u.fullName}
-                        className="w-11 h-11 rounded-xl object-cover ring-2 ring-slate-200 dark:ring-slate-700"
-                      />
+                      <div
+                        onClick={() => (isAdmin || isSelf) && setPfpTargetUser(u)}
+                        className={`relative group cursor-pointer ${
+                          isAdmin || isSelf ? 'hover:opacity-90' : ''
+                        }`}
+                        title={isAdmin || isSelf ? 'Click to change profile picture' : ''}
+                      >
+                        <img
+                          src={u.avatar}
+                          alt={u.fullName}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(u.fullName || u.username)}&background=3b82f6&color=fff`;
+                          }}
+                          className="w-12 h-12 rounded-xl object-cover ring-2 ring-slate-200 dark:ring-slate-700"
+                        />
+                        {(isAdmin || isSelf) && (
+                          <div className="absolute inset-0 bg-slate-900/40 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Camera className="w-4 h-4 text-white" />
+                          </div>
+                        )}
+                      </div>
                       <div>
                         <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 leading-snug">
                           {u.fullName}
@@ -299,33 +321,45 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
                   </div>
                 </div>
 
-                {/* Admin Actions */}
-                {isAdmin && (
-                  <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center gap-2 justify-end">
+                {/* Actions */}
+                <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center gap-2 justify-end">
+                  {(isAdmin || isSelf) && (
                     <button
-                      onClick={() => {
-                        setEditingUser(u);
-                        setEditFullName(u.fullName);
-                        setEditRole(u.role);
-                        setEditPassword('');
-                      }}
-                      className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1"
+                      onClick={() => setPfpTargetUser(u)}
+                      className="px-2.5 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors flex items-center gap-1"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit Role</span>
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Change PFP</span>
                     </button>
+                  )}
 
-                    {u.username !== 'akbar293838' && u.username !== 'admin' && u.id !== 'user-admin-1' && (
+                  {isAdmin && (
+                    <>
                       <button
-                        onClick={() => handlePromptDeleteUser(u)}
-                        className="px-2.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1"
+                        onClick={() => {
+                          setEditingUser(u);
+                          setEditFullName(u.fullName);
+                          setEditRole(u.role);
+                          setEditPassword('');
+                        }}
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Delete</span>
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit Role</span>
                       </button>
-                    )}
-                  </div>
-                )}
+
+                      {u.username !== 'akbar293838' && u.username !== 'admin' && u.id !== 'user-admin-1' && (
+                        <button
+                          onClick={() => handlePromptDeleteUser(u)}
+                          className="px-2.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
 
               </div>
             );
@@ -567,6 +601,22 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast }) => 
         onClose={() => setUserToDelete(null)}
         onConfirm={handleExecuteDeleteUser}
       />
+
+      {/* PFP Changer Modal */}
+      {pfpTargetUser && (
+        <PfpChangerModal
+          isOpen={pfpTargetUser !== null}
+          targetUser={pfpTargetUser}
+          onClose={() => setPfpTargetUser(null)}
+          onAvatarUpdated={(updatedUser) => {
+            fetchUsers();
+            if (currentUser && currentUser.id === updatedUser.id) {
+              onCurrentUserUpdated?.(updatedUser);
+            }
+          }}
+          showToast={showToast}
+        />
+      )}
 
     </div>
   );

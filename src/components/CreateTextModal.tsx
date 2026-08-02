@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { FileCode, X, Plus, AlertCircle, Loader2 } from 'lucide-react';
+import { User } from '../types';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
+  currentUser?: User | null;
 }
 
-export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated }) => {
+export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, currentUser }) => {
   const [title, setTitle] = useState('');
   const [extension, setExtension] = useState('txt');
   const [content, setContent] = useState('');
@@ -28,9 +30,15 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated })
     setError(null);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (currentUser) {
+        headers['x-username'] = currentUser.username;
+        headers['x-user-role'] = currentUser.role;
+      }
+
       const res = await fetch('/api/files/create-text', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           title: title.trim(),
           extension,
