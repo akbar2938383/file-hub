@@ -13,6 +13,7 @@ import { QRCodeModal } from './components/QRCodeModal';
 import { LoginPage } from './components/LoginPage';
 import { WallpaperChangerPage } from './components/WallpaperChangerPage';
 import { UserControlPage } from './components/UserControlPage';
+import { LiveWallpaperCanvas } from './components/LiveWallpaperCanvas';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -247,8 +248,18 @@ export default function App() {
     <div className="relative min-h-screen text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-500 selection:text-white transition-colors overflow-x-hidden">
       
       {/* Dynamic Global Background Layer */}
-      <div className="fixed inset-0 z-0 pointer-events-none transition-all duration-700">
-        {activeWallpaper?.url && (
+      <div className="fixed inset-0 z-0 pointer-events-none transition-all duration-700 bg-slate-950">
+        {activeWallpaper?.isLive ? (
+          <LiveWallpaperCanvas
+            isLive={true}
+            liveType={activeWallpaper.liveType}
+            videoUrl={activeWallpaper.videoUrl}
+            className="w-full h-full object-cover scale-105 transition-all duration-700"
+            style={{
+              filter: `blur(${activeWallpaper.blur || 0}px) brightness(${activeWallpaper.brightness ?? 0.85})`,
+            }}
+          />
+        ) : activeWallpaper?.url ? (
           <img
             src={activeWallpaper.url}
             alt="Dynamic Server Wallpaper"
@@ -257,7 +268,7 @@ export default function App() {
               filter: `blur(${activeWallpaper.blur || 0}px) brightness(${activeWallpaper.brightness ?? 0.85})`,
             }}
           />
-        )}
+        ) : null}
         <div
           className="absolute inset-0 bg-slate-950 transition-opacity duration-700"
           style={{ opacity: activeWallpaper?.overlayOpacity ?? 0.35 }}

@@ -36,6 +36,8 @@ export interface User {
   lastLoginAt?: string;
 }
 
+export type LiveType = 'aurora' | 'particles' | 'nebula' | 'matrix' | 'waves' | 'cybergrid' | 'video';
+
 export interface WallpaperConfig {
   id: string;
   name: string;
@@ -45,6 +47,9 @@ export interface WallpaperConfig {
   brightness: number;
   updatedBy: string;
   updatedAt: string;
+  isLive?: boolean;
+  liveType?: LiveType;
+  videoUrl?: string;
 }
 
 export interface WallpaperPreset {
@@ -52,6 +57,9 @@ export interface WallpaperPreset {
   name: string;
   url: string;
   category: string;
+  isLive?: boolean;
+  liveType?: LiveType;
+  videoUrl?: string;
 }
 
 export interface WallpaperSettings {

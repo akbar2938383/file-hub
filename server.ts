@@ -51,11 +51,22 @@ interface WallpaperConfig {
   brightness: number;
   updatedBy: string;
   updatedAt: string;
+  isLive?: boolean;
+  liveType?: string;
+  videoUrl?: string;
 }
 
 interface SettingsRecord {
   activeWallpaper: WallpaperConfig;
-  presets: Array<{ id: string; name: string; url: string; category: string }>;
+  presets: Array<{
+    id: string;
+    name: string;
+    url: string;
+    category: string;
+    isLive?: boolean;
+    liveType?: string;
+    videoUrl?: string;
+  }>;
 }
 
 // Initial default users
@@ -91,8 +102,59 @@ const DEFAULT_SETTINGS: SettingsRecord = {
     brightness: 0.85,
     updatedBy: "System Administrator",
     updatedAt: new Date().toISOString(),
+    isLive: false,
+    liveType: "aurora",
+    videoUrl: ""
   },
   presets: [
+    {
+      id: "wp-live-1",
+      name: "✨ Live Aurora Boreal Wave",
+      url: "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "aurora"
+    },
+    {
+      id: "wp-live-2",
+      name: "🌌 Live Cosmic Star Particles",
+      url: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "particles"
+    },
+    {
+      id: "wp-live-3",
+      name: "🔮 Live Deep Nebula Glow",
+      url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "nebula"
+    },
+    {
+      id: "wp-live-4",
+      name: "💻 Live Digital Matrix Rain",
+      url: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "matrix"
+    },
+    {
+      id: "wp-live-5",
+      name: "🌊 Live Fluid Wave Flow",
+      url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "waves"
+    },
+    {
+      id: "wp-live-6",
+      name: "🌐 Live Synthwave Cyber Grid",
+      url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=2000&q=80",
+      category: "Live Animated",
+      isLive: true,
+      liveType: "cybergrid"
+    },
     {
       id: "wp-1",
       name: "Aurora Borealis Night",
@@ -318,11 +380,15 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB max per file
+  limits: {
+    fileSize: 500 * 1024 * 1024, // 500 MB max per file
+    fieldSize: 100 * 1024 * 1024,
+    files: 200,
+  },
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
 // --- API ROUTES ---
 
@@ -514,21 +580,24 @@ app.get("/api/wallpaper", (_req, res) => {
 
 // Update active wallpaper (Admin action or live preview)
 app.post("/api/wallpaper", (req, res) => {
-  const { url, name, blur, overlayOpacity, brightness, updatedBy } = req.body;
-  if (!url) {
-    return res.status(400).json({ error: "Wallpaper URL is required" });
+  const { url, name, blur, overlayOpacity, brightness, updatedBy, isLive, liveType, videoUrl } = req.body;
+  if (!url && !isLive) {
+    return res.status(400).json({ error: "Wallpaper URL or Live Mode is required" });
   }
 
   const settings = getSettings();
   settings.activeWallpaper = {
     id: `wp-${Date.now()}`,
-    name: name || "Custom Selected Wallpaper",
-    url,
+    name: name || (isLive ? "Live Animated Wallpaper" : "Custom Selected Wallpaper"),
+    url: url || "",
     blur: typeof blur === "number" ? blur : settings.activeWallpaper.blur ?? 0,
     overlayOpacity: typeof overlayOpacity === "number" ? overlayOpacity : settings.activeWallpaper.overlayOpacity ?? 0.35,
     brightness: typeof brightness === "number" ? brightness : settings.activeWallpaper.brightness ?? 0.85,
     updatedBy: updatedBy || "Administrator",
     updatedAt: new Date().toISOString(),
+    isLive: Boolean(isLive),
+    liveType: liveType || "aurora",
+    videoUrl: videoUrl || "",
   };
 
   saveSettings(settings);
@@ -725,7 +794,7 @@ app.get("/api/files/stats", (_req, res) => {
 });
 
 // 3. Upload File(s)
-app.post("/api/files/upload", upload.array("files", 20), (req, res) => {
+app.post("/api/files/upload", upload.array("files", 100), (req, res) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: "No files uploaded" });
