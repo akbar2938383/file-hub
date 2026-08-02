@@ -66,12 +66,14 @@ export const FileList: React.FC<Props> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
 
+  const normalizePath = (p: string | undefined | null) =>
+    (p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+
   // Filter files by current folder level if search term is empty
   const displayedFiles = searchTerm.trim()
     ? files
     : files.filter((f) => {
-        const itemFolder = f.folderPath || '';
-        return itemFolder === currentFolderPath;
+        return normalizePath(f.folderPath) === normalizePath(currentFolderPath);
       });
 
   const allSelected = displayedFiles.length > 0 && selectedIds.length === displayedFiles.length;

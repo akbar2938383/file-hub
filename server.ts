@@ -37,6 +37,31 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 const METADATA_FILE = path.join(UPLOADS_DIR, "metadata.json");
 const USERS_FILE = path.join(UPLOADS_DIR, "users.json");
 const SETTINGS_FILE = path.join(UPLOADS_DIR, "settings.json");
+const DELETED_IDS_FILE = path.join(UPLOADS_DIR, "deleted_ids.json");
+
+function getDeletedIds(): Set<string> {
+  try {
+    if (!fs.existsSync(DELETED_IDS_FILE)) {
+      return new Set();
+    }
+    const data = fs.readFileSync(DELETED_IDS_FILE, "utf-8");
+    const arr = JSON.parse(data);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch (err) {
+    console.error("Error reading deleted ids:", err);
+    return new Set();
+  }
+}
+
+function addDeletedIds(ids: string[]) {
+  try {
+    const current = getDeletedIds();
+    ids.forEach((id) => current.add(id));
+    fs.writeFileSync(DELETED_IDS_FILE, JSON.stringify(Array.from(current), null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving deleted ids:", err);
+  }
+}
 
 interface UserRecord {
   id: string;
@@ -831,10 +856,20 @@ app.post("/api/files/sync", (req, res) => {
   }
 
   const currentRecords = getMetadata();
+  const deletedIds = getDeletedIds();
   let modified = false;
 
   for (const cf of clientFiles) {
     if (!cf || !cf.id || !cf.originalName) continue;
+    // Do not restore items that were explicitly deleted
+    if (deletedIds.has(cf.id)) continue;
+
+    // Do not restore non-folder files whose binary upload does not exist
+    if (!cf.isFolder && cf.filename) {
+      const filePath = path.join(UPLOADS_DIR, cf.filename);
+      if (!fs.existsSync(filePath)) continue;
+    }
+
     const existing = currentRecords.find((r) => r.id === cf.id);
     if (!existing) {
       currentRecords.push(cf);
@@ -855,7 +890,8 @@ app.get("/api/files", (req, res) => {
   let records = getMetadata();
 
   if (category && typeof category === "string" && category !== "all") {
-    records = records.filter((r) => r.category === category);
+    // Preserve folder containers when filtering by category
+    records = records.filter((r) => r.isFolder || r.category === category);
   }
 
   if (search && typeof search === "string" && search.trim() !== "") {
@@ -971,16 +1007,16 @@ function ensureFolderHierarchy(
   for (let i = 0; i < dirParts.length; i++) {
     const dirName = dirParts[i];
     const parentPath = accumulatedPath;
-    const fullFolderPath = parentPath ? `${parentPath}/${dirName}` : dirName;
-
-    const existsInMeta = existingRecords.some(
+    const existingFolder = existingRecords.find(
       (r) => r.isFolder && (r.folderPath || '') === parentPath && r.originalName.toLowerCase() === dirName.toLowerCase()
-    );
-    const existsInNew = createdFolders.some(
+    ) || createdFolders.find(
       (r) => r.isFolder && (r.folderPath || '') === parentPath && r.originalName.toLowerCase() === dirName.toLowerCase()
     );
 
-    if (!existsInMeta && !existsInNew) {
+    const actualDirName = existingFolder ? existingFolder.originalName : dirName;
+    const fullFolderPath = parentPath ? `${parentPath}/${actualDirName}` : actualDirName;
+
+    if (!existingFolder) {
       const folderRecord: FileRecord = {
         id: `folder-${crypto.randomUUID()}`,
         originalName: dirName,
@@ -1518,6 +1554,7 @@ app.delete("/api/files/:id", (req, res) => {
   }
 
   const deleteSet = new Set(permittedItemsToDelete.map((r) => r.id));
+  addDeletedIds(Array.from(deleteSet));
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
@@ -1575,6 +1612,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
     deletedCount++;
   }
 
+  addDeletedIds(Array.from(allowedIds));
   records = records.filter((r) => !allowedIds.has(r.id));
   saveMetadata(records);
 
@@ -1585,6 +1623,18 @@ app.post("/api/files/bulk-delete", (req, res) => {
   }
 
   res.json({ message: msg });
+});
+
+// Global Express & Multer Error Handling Middleware
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Global express error:", err);
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "File exceeds the 500 MB upload size limit." });
+    }
+    return res.status(400).json({ error: `Upload error: ${err.message}` });
+  }
+  res.status(err.status || 500).json({ error: err.message || "An unexpected error occurred on the server." });
 });
 
 

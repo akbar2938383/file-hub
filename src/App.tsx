@@ -232,7 +232,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setFiles(data);
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           try {
             localStorage.setItem('vault_files_backup', JSON.stringify(data));
           } catch (e) {}
