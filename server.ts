@@ -338,7 +338,35 @@ function getMetadata(): FileRecord[] {
       return [];
     }
     const data = fs.readFileSync(METADATA_FILE, "utf-8");
-    return JSON.parse(data);
+    const records: FileRecord[] = JSON.parse(data);
+    let modified = false;
+
+    records.forEach((r) => {
+      if (r.folderPath) {
+        const cleanFolderPath = r.folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        if (cleanFolderPath !== r.folderPath) {
+          r.folderPath = cleanFolderPath;
+          modified = true;
+        }
+      } else if (r.folderPath === undefined || r.folderPath === null) {
+        r.folderPath = '';
+        modified = true;
+      }
+
+      if (!r.isFolder && r.originalName) {
+        const cleanName = path.basename(r.originalName.replace(/\\/g, '/'));
+        if (cleanName !== r.originalName) {
+          r.originalName = cleanName;
+          modified = true;
+        }
+      }
+    });
+
+    if (modified) {
+      saveMetadata(records);
+    }
+
+    return records;
   } catch (err) {
     console.error("Error reading metadata:", err);
     return [];
@@ -921,14 +949,24 @@ function ensureFolderHierarchy(
   uploadedByRole: 'administrator' | 'normal'
 ): { fileFolderPath: string; createdFolders: FileRecord[] } {
   const createdFolders: FileRecord[] = [];
-  const parts = relPath.split(/[/\\]/).filter(Boolean);
+
+  let cleanRel = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
+  const cleanBase = baseFolderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+
+  if (cleanBase) {
+    if (cleanRel === cleanBase || cleanRel.startsWith(cleanBase + '/')) {
+      cleanRel = cleanRel.slice(cleanBase.length).replace(/^\/+/, '');
+    }
+  }
+
+  const parts = cleanRel.split('/').filter(Boolean);
 
   if (parts.length <= 1) {
-    return { fileFolderPath: baseFolderPath, createdFolders };
+    return { fileFolderPath: cleanBase, createdFolders };
   }
 
   const dirParts = parts.slice(0, -1);
-  let accumulatedPath = baseFolderPath;
+  let accumulatedPath = cleanBase;
 
   for (let i = 0; i < dirParts.length; i++) {
     const dirName = dirParts[i];
@@ -936,23 +974,23 @@ function ensureFolderHierarchy(
     const fullFolderPath = parentPath ? `${parentPath}/${dirName}` : dirName;
 
     const existsInMeta = existingRecords.some(
-      (r) => r.isFolder && (r.folderPath || "") === parentPath && r.originalName === dirName
+      (r) => r.isFolder && (r.folderPath || '') === parentPath && r.originalName.toLowerCase() === dirName.toLowerCase()
     );
     const existsInNew = createdFolders.some(
-      (r) => r.isFolder && (r.folderPath || "") === parentPath && r.originalName === dirName
+      (r) => r.isFolder && (r.folderPath || '') === parentPath && r.originalName.toLowerCase() === dirName.toLowerCase()
     );
 
     if (!existsInMeta && !existsInNew) {
       const folderRecord: FileRecord = {
         id: `folder-${crypto.randomUUID()}`,
         originalName: dirName,
-        filename: "",
+        filename: '',
         size: 0,
-        mimeType: "inode/directory",
+        mimeType: 'inode/directory',
         uploadDate: new Date().toISOString(),
-        category: "folder",
-        tags: ["folder"],
-        description: "Uploaded folder container",
+        category: 'folder',
+        tags: ['folder'],
+        description: 'Uploaded folder container',
         downloadCount: 0,
         uploadedBy,
         uploadedByRole,
@@ -1052,10 +1090,11 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
 
     newlyCreatedFolders.push(...createdFolders);
 
-    const category = detectCategory(file.mimetype || "application/octet-stream", file.originalname);
+    const cleanOriginalName = path.basename(file.originalname.replace(/\\/g, "/"));
+    const category = detectCategory(file.mimetype || "application/octet-stream", cleanOriginalName);
     const record: FileRecord = {
       id: crypto.randomUUID(),
-      originalName: file.originalname,
+      originalName: cleanOriginalName,
       filename: file.filename,
       size: file.size,
       mimeType: file.mimetype || "application/octet-stream",
@@ -1344,6 +1383,98 @@ app.put("/api/files/:id", (req, res) => {
   res.json({ message: "File metadata updated", file: records[index] });
 });
 
+/**
+ * Gets the clean, normalized full path of a file or folder record.
+ */
+function getItemFullPath(record: FileRecord): string {
+  const fp = (record.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const name = (record.originalName || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!fp) return name;
+  return `${fp}/${name}`;
+}
+
+/**
+ * Checks if candidate is a descendant (child, grandchild, etc.) of targetFolder.
+ */
+function isDescendantOfFolder(candidate: FileRecord, targetFolder: FileRecord): boolean {
+  if (!targetFolder.isFolder) return false;
+  if (candidate.id === targetFolder.id) return false;
+
+  const targetFullPath = getItemFullPath(targetFolder).toLowerCase();
+  const candFolderPath = (candidate.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+
+  if (!targetFullPath || !candFolderPath) return false;
+
+  return candFolderPath === targetFullPath || candFolderPath.startsWith(targetFullPath + "/");
+}
+
+/**
+ * Checks if candidate is a parent or ancestor folder of targetItem.
+ */
+function isAncestorOfItem(candidate: FileRecord, targetItem: FileRecord): boolean {
+  if (!candidate.isFolder) return false;
+  if (candidate.id === targetItem.id) return false;
+
+  const candidateFullPath = getItemFullPath(candidate).toLowerCase();
+  const targetFolderPath = (targetItem.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+
+  if (!candidateFullPath || !targetFolderPath) return false;
+
+  return targetFolderPath === candidateFullPath || targetFolderPath.startsWith(candidateFullPath + "/");
+}
+
+/**
+ * Recursively resolves all items to be deleted for a list of target item IDs.
+ * Verifies child/parent relationships so deleting a file or nested folder never touches parent or sibling items.
+ */
+function getRecursiveDeletionList(targetIds: string[], allRecords: FileRecord[]): FileRecord[] {
+  const resultIds = new Set<string>();
+  const recordMap = new Map<string, FileRecord>();
+  allRecords.forEach((r) => recordMap.set(r.id, r));
+
+  for (const targetId of targetIds) {
+    const target = recordMap.get(targetId);
+    if (!target) continue;
+
+    // Add target itself
+    resultIds.add(target.id);
+
+    // If target is a folder, find all verified descendants recursively
+    if (target.isFolder) {
+      for (const record of allRecords) {
+        if (isDescendantOfFolder(record, target)) {
+          // Double check: candidate must NOT be an ancestor
+          if (!isAncestorOfItem(record, target)) {
+            resultIds.add(record.id);
+          }
+        }
+      }
+    }
+  }
+
+  // Final verification pass: Ensure no item in deletion list is an ancestor of any directly requested target
+  const finalRecords: FileRecord[] = [];
+  for (const id of resultIds) {
+    const rec = recordMap.get(id);
+    if (!rec) continue;
+
+    let isAccidentalAncestor = false;
+    for (const targetId of targetIds) {
+      const target = recordMap.get(targetId);
+      if (target && isAncestorOfItem(rec, target)) {
+        isAccidentalAncestor = true;
+        break;
+      }
+    }
+
+    if (!isAccidentalAncestor) {
+      finalRecords.push(rec);
+    }
+  }
+
+  return finalRecords;
+}
+
 // 9. Delete File or Folder
 app.delete("/api/files/:id", (req, res) => {
   const { id } = req.params;
@@ -1355,28 +1486,28 @@ app.delete("/api/files/:id", (req, res) => {
     return res.status(404).json({ error: "File or folder not found" });
   }
 
-  // Check if item was created by administrator and requester is normal user
+  // Check if target item was created by administrator and requester is normal user
   if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
     return res.status(403).json({
       error: "This item was created by an Administrator and cannot be deleted by normal users.",
     });
   }
 
-  let idsToDelete = [record.id];
+  // Resolve full recursive deletion list with strict parent/child relationship checks
+  const itemsToDelete = getRecursiveDeletionList([record.id], records);
 
-  if (record.isFolder) {
-    const folderFullPath = record.folderPath ? `${record.folderPath}/${record.originalName}` : record.originalName;
-    const subRecords = records.filter(
-      (r) => (r.folderPath || "") === folderFullPath || (r.folderPath || "").startsWith(folderFullPath + "/")
-    );
-    idsToDelete.push(...subRecords.map((r) => r.id));
-  }
+  // Filter out any sub-items uploaded by administrator if requester is normal user
+  const permittedItemsToDelete = itemsToDelete.filter((rec) => {
+    if (rec.uploadedByRole === "administrator" && requesterRole !== "administrator") {
+      return false;
+    }
+    return true;
+  });
 
-  for (const delId of idsToDelete) {
-    const rec = records.find((r) => r.id === delId);
-    if (rec && !rec.isFolder && rec.filename) {
+  for (const rec of permittedItemsToDelete) {
+    if (!rec.isFolder && rec.filename) {
       const filePath = path.join(UPLOADS_DIR, rec.filename);
-      if (fs.existsSync(filePath)) {
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         try {
           fs.unlinkSync(filePath);
         } catch (err) {
@@ -1386,7 +1517,7 @@ app.delete("/api/files/:id", (req, res) => {
     }
   }
 
-  const deleteSet = new Set(idsToDelete);
+  const deleteSet = new Set(permittedItemsToDelete.map((r) => r.id));
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
@@ -1404,9 +1535,17 @@ app.post("/api/files/bulk-delete", (req, res) => {
 
   let records = getMetadata();
   const targetRecords = records.filter((r) => ids.includes(r.id));
+  const targetIds = targetRecords.map((r) => r.id);
 
-  // If requester is not admin, filter out admin-uploaded files
-  const allowedToDelete = targetRecords.filter((record) => {
+  if (targetIds.length === 0) {
+    return res.status(404).json({ error: "No valid files found for deletion" });
+  }
+
+  // Resolve full recursive deletion list with strict parent/child relationship checks
+  const itemsToDelete = getRecursiveDeletionList(targetIds, records);
+
+  // Filter out any items uploaded by administrator if requester is not administrator
+  const allowedToDelete = itemsToDelete.filter((record) => {
     if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
       return false;
     }
@@ -1439,7 +1578,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
   records = records.filter((r) => !allowedIds.has(r.id));
   saveMetadata(records);
 
-  const skippedCount = targetRecords.length - allowedToDelete.length;
+  const skippedCount = targetRecords.length - targetRecords.filter((r) => allowedIds.has(r.id)).length;
   let msg = `${deletedCount} file(s) deleted successfully.`;
   if (skippedCount > 0) {
     msg += ` (${skippedCount} file(s) uploaded by Administrator were protected and skipped)`;

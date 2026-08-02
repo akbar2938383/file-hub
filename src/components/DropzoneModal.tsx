@@ -70,11 +70,22 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
       });
     } else if (item.isDirectory) {
       const dirReader = item.createReader();
-      const entries: any[] = await new Promise((resolve) => {
-        dirReader.readEntries((result: any[]) => resolve(result));
-      });
+      let allEntries: any[] = [];
+      
+      const readBatch = (): Promise<any[]> => {
+        return new Promise((resolve) => {
+          dirReader.readEntries((result: any[]) => resolve(result || []));
+        });
+      };
+
+      let entries = await readBatch();
+      while (entries.length > 0) {
+        allEntries = allEntries.concat(entries);
+        entries = await readBatch();
+      }
+
       const filesArrays = await Promise.all(
-        entries.map((entry) => traverseFileTree(entry, path + item.name + '/'))
+        allEntries.map((entry) => traverseFileTree(entry, path + item.name + '/'))
       );
       return filesArrays.flat();
     }
@@ -140,8 +151,8 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
     });
 
     setQueuedFiles((prev) => {
-      const existingKeys = new Set(prev.map((item) => `${item.relativePath || item.file.name}-${item.file.size}`));
-      const filteredNew = newItems.filter((item) => !existingKeys.has(`${item.relativePath || item.file.name}-${item.file.size}`));
+      const existingKeys = new Set(prev.map((item) => `${item.file.name}-${item.file.size}-${item.relativePath || ''}`));
+      const filteredNew = newItems.filter((item) => !existingKeys.has(`${item.file.name}-${item.file.size}-${item.relativePath || ''}`));
       return [...prev, ...filteredNew];
     });
   };
@@ -149,12 +160,14 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       addFiles(Array.from(e.target.files));
+      e.target.value = '';
     }
   };
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       addFiles(Array.from(e.target.files));
+      e.target.value = '';
     }
   };
 
@@ -184,8 +197,8 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
 
     setQueuedFiles((prev) => {
       // Prevent duplicates based on relative path + size
-      const existingKeys = new Set(prev.map((item) => `${item.relativePath || item.file.name}-${item.file.size}`));
-      const filteredNew = newItems.filter((item) => !existingKeys.has(`${item.relativePath || item.file.name}-${item.file.size}`));
+      const existingKeys = new Set(prev.map((item) => `${item.file.name}-${item.file.size}-${item.relativePath || ''}`));
+      const filteredNew = newItems.filter((item) => !existingKeys.has(`${item.file.name}-${item.file.size}-${item.relativePath || ''}`));
       return [...prev, ...filteredNew];
     });
   };
