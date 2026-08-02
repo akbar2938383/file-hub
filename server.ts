@@ -970,7 +970,8 @@ function ensureFolderHierarchy(
 
 // Create Custom Folder
 app.post("/api/folders/create", (req, res) => {
-  const { name, parentPath = "" } = req.body;
+  const { name } = req.body;
+  const parentPath = req.body.parentPath || req.body.parentFolderPath || "";
   if (!name || typeof name !== "string" || !name.trim()) {
     return res.status(400).json({ error: "Folder name is required" });
   }

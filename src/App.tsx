@@ -70,6 +70,7 @@ export default function App() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>('');
   const [sortOption, setSortOption] = useState<SortOption>('date_desc');
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>('all');
+  const [currentFolderPath, setCurrentFolderPath] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -420,10 +421,10 @@ export default function App() {
   const activeWallpaper = wallpaperSettings?.activeWallpaper;
 
   return (
-    <div className="relative min-h-screen text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-500 selection:text-white transition-colors overflow-x-hidden">
+    <div className="relative min-h-screen text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-950 font-sans selection:bg-blue-500 selection:text-white transition-colors overflow-x-hidden">
       
       {/* Dynamic Global Background Layer */}
-      <div className="fixed inset-0 z-0 pointer-events-none transition-all duration-700 bg-slate-950">
+      <div className="fixed inset-0 z-0 pointer-events-none transition-all duration-700 bg-slate-100 dark:bg-slate-950">
         {activeWallpaper?.isLive ? (
           <LiveWallpaperCanvas
             isLive={true}
@@ -445,7 +446,7 @@ export default function App() {
           />
         ) : null}
         <div
-          className="absolute inset-0 bg-slate-950 transition-opacity duration-700"
+          className="absolute inset-0 bg-slate-200/60 dark:bg-slate-950 transition-opacity duration-700"
           style={{ opacity: activeWallpaper?.overlayOpacity ?? 0.35 }}
         />
       </div>
@@ -531,6 +532,8 @@ export default function App() {
                   onOpenUpload={() => setIsUploadOpen(true)}
                   onQrCode={(f) => setQrCodeFile(f)}
                   currentUser={currentUser}
+                  currentFolderPath={currentFolderPath}
+                  setCurrentFolderPath={setCurrentFolderPath}
                 />
               </main>
             )
@@ -569,6 +572,8 @@ export default function App() {
                   onOpenUpload={() => setIsUploadOpen(true)}
                   onQrCode={(f) => setQrCodeFile(f)}
                   currentUser={currentUser}
+                  currentFolderPath={currentFolderPath}
+                  setCurrentFolderPath={setCurrentFolderPath}
                 />
               </main>
             )
@@ -608,6 +613,8 @@ export default function App() {
                 currentUser={currentUser}
                 onRefreshFiles={fetchFiles}
                 showToast={showToast}
+                currentFolderPath={currentFolderPath}
+                setCurrentFolderPath={setCurrentFolderPath}
               />
 
             </main>
@@ -640,6 +647,7 @@ export default function App() {
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         currentUser={currentUser}
+        currentFolderPath={currentFolderPath}
         onUploadSuccess={() => {
           showToast('Files uploaded successfully');
           fetchFiles();
@@ -651,6 +659,7 @@ export default function App() {
         isOpen={isCreateTextOpen}
         onClose={() => setIsCreateTextOpen(false)}
         currentUser={currentUser}
+        currentFolderPath={currentFolderPath}
         onCreated={() => {
           showToast('File created successfully');
           fetchFiles();

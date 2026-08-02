@@ -7,9 +7,10 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   currentUser?: User | null;
+  currentFolderPath?: string;
 }
 
-export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, currentUser }) => {
+export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, currentUser, currentFolderPath }) => {
   const [title, setTitle] = useState('');
   const [extension, setExtension] = useState('txt');
   const [content, setContent] = useState('');
@@ -44,6 +45,7 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
           extension,
           content,
           description: description.trim(),
+          folderPath: currentFolderPath || '',
         }),
       });
 
