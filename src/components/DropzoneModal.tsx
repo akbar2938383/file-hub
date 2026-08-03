@@ -393,7 +393,93 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
       }
     };
 
-    const CHUNK_THRESHOLD = 5 * 1024 * 1024; // 5 MB threshold for chunked upload
+    const CHUNK_THRESHOLD = 25 * 1024 * 1024; // 25 MB threshold for chunked upload
+
+    const uploadSingleFileDirectly = async (item: QueuedFile): Promise<boolean> => {
+      let attempts = 0;
+      const maxAttempts = 3;
+      let directSuccess = false;
+
+      while (attempts < maxAttempts && !directSuccess && !isCancelledRef.current) {
+        attempts++;
+        try {
+          const formData = new FormData();
+          if (currentFolderPath) {
+            formData.append('folderPath', currentFolderPath);
+          }
+          const relPath = item.relativePath || item.file.name;
+          formData.append('relativePaths', JSON.stringify([relPath]));
+          formData.append('files', item.file);
+
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            currentXhrRef.current = xhr;
+
+            xhr.upload.addEventListener('progress', (e) => {
+              if (e.lengthComputable) {
+                updateStats(e.loaded);
+              }
+            });
+
+            xhr.addEventListener('load', () => {
+              currentXhrRef.current = null;
+              if (xhr.status >= 200 && xhr.status < 300) {
+                directSuccess = true;
+                try {
+                  const resData = JSON.parse(xhr.responseText);
+                  if (resData.uploadedFile) {
+                    idbSaveRecord(resData.uploadedFile);
+                    idbSaveBlob(resData.uploadedFile.id, item.file);
+                  } else if (Array.isArray(resData.uploadedFiles)) {
+                    for (const f of resData.uploadedFiles) {
+                      idbSaveRecord(f);
+                      idbSaveBlob(f.id, item.file);
+                    }
+                  }
+                  if (Array.isArray(resData.createdFolders) && resData.createdFolders.length > 0) {
+                    idbSaveRecords(resData.createdFolders);
+                  }
+                } catch (e) {}
+                resolve();
+              } else {
+                try {
+                  const res = JSON.parse(xhr.responseText);
+                  reject(new Error(res.error || `Upload HTTP error ${xhr.status}`));
+                } catch {
+                  reject(new Error(`Server error ${xhr.status}`));
+                }
+              }
+            });
+
+            xhr.addEventListener('error', () => {
+              currentXhrRef.current = null;
+              reject(new Error('Network drop during upload'));
+            });
+
+            xhr.addEventListener('abort', () => {
+              currentXhrRef.current = null;
+              reject(new Error('Upload cancelled'));
+            });
+
+            xhr.open('POST', '/api/files/upload');
+            if (currentUser) {
+              xhr.setRequestHeader('x-username', currentUser.username);
+              xhr.setRequestHeader('x-user-role', currentUser.role);
+            }
+            xhr.send(formData);
+          });
+        } catch (err: any) {
+          if (isCancelledRef.current || err.message === 'Upload cancelled') {
+            throw new Error('Upload cancelled');
+          }
+          if (attempts < maxAttempts) {
+            await new Promise((r) => setTimeout(r, 400));
+          }
+        }
+      }
+
+      return directSuccess;
+    };
 
     try {
       for (let i = 0; i < validFiles.length; i++) {
@@ -409,7 +495,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
         let fileSuccess = false;
 
         if (item.file.size > CHUNK_THRESHOLD) {
-          // Large file: Resumable chunked upload
+          // Large file: Resumable chunked upload with fallback
           try {
             await uploadLargeFileInChunks(item, updateStats, (chunkSize) => {
               completedBytes += chunkSize;
@@ -420,91 +506,16 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
             if (isCancelledRef.current || err.message === 'Upload cancelled') {
               throw new Error('Upload cancelled');
             }
-            console.error(`Chunked upload failed for ${item.file.name}:`, err);
-          }
-        } else {
-          // Small file: Single request
-          let attempts = 0;
-          const maxAttempts = 3;
-
-          while (attempts < maxAttempts && !fileSuccess && !isCancelledRef.current) {
-            attempts++;
-            try {
-              const formData = new FormData();
-              if (currentFolderPath) {
-                formData.append('folderPath', currentFolderPath);
-              }
-              const relPath = item.relativePath || item.file.name;
-              formData.append('relativePaths', JSON.stringify([relPath]));
-              formData.append('files', item.file);
-
-              await new Promise<void>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                currentXhrRef.current = xhr;
-
-                xhr.upload.addEventListener('progress', (e) => {
-                  if (e.lengthComputable) {
-                    updateStats(e.loaded);
-                  }
-                });
-
-                xhr.addEventListener('load', () => {
-                  currentXhrRef.current = null;
-                  if (xhr.status >= 200 && xhr.status < 300) {
-                    fileSuccess = true;
-                    try {
-                      const resData = JSON.parse(xhr.responseText);
-                      if (resData.uploadedFile) {
-                        idbSaveRecord(resData.uploadedFile);
-                        idbSaveBlob(resData.uploadedFile.id, item.file);
-                      } else if (Array.isArray(resData.files)) {
-                        for (const f of resData.files) {
-                          idbSaveRecord(f);
-                          idbSaveBlob(f.id, item.file);
-                        }
-                      }
-                      if (Array.isArray(resData.createdFolders) && resData.createdFolders.length > 0) {
-                        idbSaveRecords(resData.createdFolders);
-                      }
-                    } catch (e) {}
-                    resolve();
-                  } else {
-                    try {
-                      const res = JSON.parse(xhr.responseText);
-                      reject(new Error(res.error || `Upload HTTP error ${xhr.status}`));
-                    } catch {
-                      reject(new Error(`Server error ${xhr.status}`));
-                    }
-                  }
-                });
-
-                xhr.addEventListener('error', () => {
-                  currentXhrRef.current = null;
-                  reject(new Error('Network drop during upload'));
-                });
-
-                xhr.addEventListener('abort', () => {
-                  currentXhrRef.current = null;
-                  reject(new Error('Upload cancelled'));
-                });
-
-                xhr.open('POST', '/api/files/upload');
-                if (currentUser) {
-                  xhr.setRequestHeader('x-username', currentUser.username);
-                  xhr.setRequestHeader('x-user-role', currentUser.role);
-                }
-                xhr.send(formData);
-              });
-            } catch (err: any) {
-              if (isCancelledRef.current || err.message === 'Upload cancelled') {
-                throw new Error('Upload cancelled');
-              }
-              if (attempts < maxAttempts) {
-                await new Promise((r) => setTimeout(r, 400));
-              }
+            console.warn(`Chunked upload failed for ${item.file.name}, trying direct upload fallback...`, err);
+            fileSuccess = await uploadSingleFileDirectly(item);
+            if (fileSuccess) {
+              completedBytes += item.file.size;
+              updateStats(0);
             }
           }
-
+        } else {
+          // Small / Medium file: Single request
+          fileSuccess = await uploadSingleFileDirectly(item);
           if (fileSuccess) {
             completedBytes += item.file.size;
             updateStats(0);

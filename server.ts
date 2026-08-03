@@ -1246,117 +1246,136 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
 
 // 3b. Upload File Chunk (Resumable Chunked Upload)
 app.post("/api/files/upload-chunk", upload.single("chunk"), (req, res) => {
-  const file = req.file;
-  const { uploadId, chunkIndex, totalChunks } = req.body;
+  try {
+    const file = req.file;
+    const { uploadId, chunkIndex, totalChunks } = req.body;
 
-  if (!file || !uploadId || chunkIndex === undefined || totalChunks === undefined) {
-    return res.status(400).json({ error: "Missing chunk upload parameters" });
+    if (!file || !uploadId || chunkIndex === undefined || totalChunks === undefined) {
+      return res.status(400).json({ error: "Missing chunk upload parameters" });
+    }
+
+    const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
+    if (!fs.existsSync(chunkDir)) {
+      fs.mkdirSync(chunkDir, { recursive: true });
+    }
+
+    const chunkPath = path.join(chunkDir, `chunk-${chunkIndex}`);
+    try {
+      fs.renameSync(file.path, chunkPath);
+    } catch (e) {
+      fs.copyFileSync(file.path, chunkPath);
+      try { fs.unlinkSync(file.path); } catch (e2) {}
+    }
+
+    res.json({ message: `Chunk ${chunkIndex} received`, chunkIndex: Number(chunkIndex) });
+  } catch (err: any) {
+    console.error("Error in upload-chunk endpoint:", err);
+    res.status(500).json({ error: err.message || "Failed to handle file chunk" });
   }
-
-  const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
-  if (!fs.existsSync(chunkDir)) {
-    fs.mkdirSync(chunkDir, { recursive: true });
-  }
-
-  const chunkPath = path.join(chunkDir, `chunk-${chunkIndex}`);
-  fs.renameSync(file.path, chunkPath);
-
-  res.json({ message: `Chunk ${chunkIndex} received`, chunkIndex: Number(chunkIndex) });
 });
 
 // 3c. Complete Chunked Upload
 app.post("/api/files/upload-complete", (req, res) => {
-  const {
-    uploadId,
-    totalChunks,
-    originalName,
-    relativePath = "",
-    folderPath = "",
-    fileSize = 0,
-    mimeType = "application/octet-stream",
-  } = req.body;
-
-  if (!uploadId || totalChunks === undefined || !originalName) {
-    return res.status(400).json({ error: "Missing upload complete parameters" });
-  }
-
-  const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
-  if (!fs.existsSync(chunkDir)) {
-    return res.status(400).json({ error: "Chunk data not found or expired" });
-  }
-
-  const total = Number(totalChunks);
-  for (let i = 0; i < total; i++) {
-    const cp = path.join(chunkDir, `chunk-${i}`);
-    if (!fs.existsSync(cp)) {
-      return res.status(400).json({ error: `Missing chunk ${i}` });
-    }
-  }
-
-  const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
-  const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
-
-  const cleanOriginalName = path.basename(originalName.replace(/\\/g, "/"));
-  const ext = path.extname(cleanOriginalName);
-  const uniqueId = crypto.randomUUID();
-  const finalFilename = `${Date.now()}-${uniqueId.slice(0, 8)}${ext}`;
-  const finalFilePath = path.join(UPLOADS_DIR, finalFilename);
-
-  // Stitch chunks sequentially
-  const writeStream = fs.createWriteStream(finalFilePath);
-  for (let i = 0; i < total; i++) {
-    const cp = path.join(chunkDir, `chunk-${i}`);
-    const chunkData = fs.readFileSync(cp);
-    writeStream.write(chunkData);
-    try {
-      fs.unlinkSync(cp);
-    } catch (e) {}
-  }
-  writeStream.end();
-
   try {
-    fs.rmdirSync(chunkDir, { recursive: true });
-  } catch (e) {}
+    const {
+      uploadId,
+      totalChunks,
+      originalName,
+      relativePath = "",
+      folderPath = "",
+      fileSize = 0,
+      mimeType = "application/octet-stream",
+    } = req.body;
 
-  const relPath = relativePath || cleanOriginalName;
-  const existingRecords = getMetadata();
+    if (!uploadId || totalChunks === undefined || !originalName) {
+      return res.status(400).json({ error: "Missing upload complete parameters" });
+    }
 
-  const { fileFolderPath, createdFolders } = ensureFolderHierarchy(
-    existingRecords,
-    folderPath,
-    relPath,
-    uploadedBy,
-    (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal"
-  );
+    const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
+    if (!fs.existsSync(chunkDir)) {
+      return res.status(400).json({ error: "Chunk data not found or expired" });
+    }
 
-  const stats = fs.statSync(finalFilePath);
-  const category = detectCategory(mimeType, cleanOriginalName);
+    const total = Number(totalChunks);
+    for (let i = 0; i < total; i++) {
+      const cp = path.join(chunkDir, `chunk-${i}`);
+      if (!fs.existsSync(cp)) {
+        return res.status(400).json({ error: `Missing chunk ${i}` });
+      }
+    }
 
-  const record: FileRecord = {
-    id: uniqueId,
-    originalName: cleanOriginalName,
-    filename: finalFilename,
-    size: stats.size || Number(fileSize),
-    mimeType: mimeType || "application/octet-stream",
-    uploadDate: new Date().toISOString(),
-    category,
-    tags: [],
-    description: "",
-    downloadCount: 0,
-    uploadedBy,
-    uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-    folderPath: fileFolderPath,
-    relativePath: relPath,
-  };
+    const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
+    const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
 
-  const updatedRecords = [record, ...createdFolders, ...existingRecords];
-  saveMetadata(updatedRecords);
+    const cleanOriginalName = path.basename(originalName.replace(/\\/g, "/"));
+    const ext = path.extname(cleanOriginalName);
+    const uniqueId = crypto.randomUUID();
+    const finalFilename = `${Date.now()}-${uniqueId.slice(0, 8)}${ext}`;
+    const finalFilePath = path.join(UPLOADS_DIR, finalFilename);
 
-  res.status(201).json({
-    message: "File upload completed successfully",
-    uploadedFile: record,
-    createdFolders,
-  });
+    // Synchronously stitch chunks sequentially to prevent partial writes
+    if (fs.existsSync(finalFilePath)) {
+      try { fs.unlinkSync(finalFilePath); } catch (e) {}
+    }
+
+    for (let i = 0; i < total; i++) {
+      const cp = path.join(chunkDir, `chunk-${i}`);
+      if (fs.existsSync(cp)) {
+        const chunkData = fs.readFileSync(cp);
+        fs.appendFileSync(finalFilePath, chunkData);
+        try {
+          fs.unlinkSync(cp);
+        } catch (e) {}
+      }
+    }
+
+    try {
+      fs.rmdirSync(chunkDir, { recursive: true });
+    } catch (e) {}
+
+    const relPath = relativePath || cleanOriginalName;
+    const existingRecords = getMetadata();
+
+    const { fileFolderPath, createdFolders } = ensureFolderHierarchy(
+      existingRecords,
+      folderPath,
+      relPath,
+      uploadedBy,
+      (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal"
+    );
+
+    const stats = fs.statSync(finalFilePath);
+    const category = detectCategory(mimeType, cleanOriginalName);
+
+    const record: FileRecord = {
+      id: uniqueId,
+      originalName: cleanOriginalName,
+      filename: finalFilename,
+      size: stats.size || Number(fileSize),
+      mimeType: mimeType || "application/octet-stream",
+      uploadDate: new Date().toISOString(),
+      category,
+      tags: [],
+      description: "",
+      downloadCount: 0,
+      uploadedBy,
+      uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+      folderPath: fileFolderPath,
+      relativePath: relPath,
+    };
+
+    const updatedRecords = [record, ...createdFolders, ...existingRecords];
+    saveMetadata(updatedRecords);
+
+    res.status(201).json({
+      message: "File upload completed successfully",
+      uploadedFile: record,
+      createdFolders,
+    });
+  } catch (err: any) {
+    console.error("Error in upload-complete endpoint:", err);
+    res.status(500).json({ error: err.message || "Failed to finalize chunked upload" });
+  }
 });
 
 // 4. Create Direct Text Note / Snippet file

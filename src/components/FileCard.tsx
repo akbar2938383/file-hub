@@ -74,18 +74,19 @@ export const FileCard: React.FC<Props> = ({
 
   if (viewMode === 'list') {
     return (
-      <div className={`group flex items-center justify-between p-3.5 bg-white dark:bg-slate-900 border rounded-xl hover:shadow-md transition-all ${
+      <div className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-3.5 gap-3 bg-white dark:bg-slate-900 border rounded-xl hover:shadow-md transition-all ${
         isSelected ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5' : 'border-slate-200 dark:border-slate-800'
       }`}>
-        <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-4">
+        {/* Left Info Section */}
+        <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
           <input
             type="checkbox"
             checked={isSelected}
             onChange={() => onToggleSelect(file.id)}
-            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
+            className="w-4 h-4 mt-1 sm:mt-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
           />
 
-          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
             {isFolder ? (
               <FolderOpen className="w-5 h-5 text-amber-500 dark:text-amber-400" />
             ) : file.category === 'image' ? (
@@ -101,10 +102,11 @@ export const FileCard: React.FC<Props> = ({
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span
                 onClick={handleCardClick}
-                className="font-medium text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer truncate"
+                className="font-medium text-xs sm:text-sm text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer truncate max-w-[180px] sm:max-w-xs"
+                title={file.originalName}
               >
                 {file.originalName}
               </span>
@@ -118,7 +120,7 @@ export const FileCard: React.FC<Props> = ({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 mt-1">
               {isFolder ? (
                 <>
                   <span className="text-amber-600 dark:text-amber-400 font-semibold">{file.itemCount || 0} item{(file.itemCount || 0) === 1 ? '' : 's'}</span>
@@ -138,8 +140,8 @@ export const FileCard: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* List Action Buttons */}
-        <div className="flex items-center gap-1 shrink-0">
+        {/* Action Buttons Toolbar */}
+        <div className="flex items-center gap-1 shrink-0 justify-end border-t sm:border-t-0 border-slate-100 dark:border-slate-800/80 pt-2 sm:pt-0 w-full sm:w-auto">
           {onQrCode && (
             <button
               id={`qr-file-${file.id}`}
@@ -148,7 +150,7 @@ export const FileCard: React.FC<Props> = ({
                 onQrCode(file);
               }}
               title="Mobile QR Code"
-              className="p-2 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
+              className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
             >
               <QrCode className="w-4 h-4" />
             </button>
@@ -158,7 +160,7 @@ export const FileCard: React.FC<Props> = ({
             id={`download-file-${file.id}`}
             onClick={() => onDownload(file)}
             title="Download file"
-            className="p-2 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
+            className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
           >
             <Download className="w-4 h-4" />
           </button>
@@ -167,7 +169,7 @@ export const FileCard: React.FC<Props> = ({
             id={`preview-file-${file.id}`}
             onClick={() => onPreview(file)}
             title="Preview file"
-            className="p-2 text-slate-600 dark:text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors"
+            className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors"
           >
             <Eye className="w-4 h-4" />
           </button>
@@ -176,7 +178,7 @@ export const FileCard: React.FC<Props> = ({
             id={`share-file-${file.id}`}
             onClick={copyShareLink}
             title="Copy download link"
-            className="p-2 text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors"
+            className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
           </button>
@@ -185,7 +187,7 @@ export const FileCard: React.FC<Props> = ({
             id={`edit-file-${file.id}`}
             onClick={() => onEdit(file)}
             title="Edit details"
-            className="p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
             <Edit3 className="w-4 h-4" />
           </button>
@@ -194,7 +196,7 @@ export const FileCard: React.FC<Props> = ({
             id={`delete-file-${file.id}`}
             onClick={() => onDelete(file.id)}
             title={isProtected ? "Protected: Uploaded by Administrator" : "Delete file"}
-            className={`p-2 rounded-lg transition-colors ${
+            className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
               isProtected
                 ? 'text-amber-500 hover:bg-amber-500/10 cursor-not-allowed'
                 : 'text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40'
