@@ -200,7 +200,12 @@ export default function App() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/files/stats');
+      const headers: Record<string, string> = {};
+      if (currentUser) {
+        headers['x-username'] = currentUser.username;
+        headers['x-user-role'] = currentUser.role;
+      }
+      const res = await fetch('/api/files/stats', { headers });
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -208,7 +213,7 @@ export default function App() {
     } catch (err) {
       console.error('Error fetching stats:', err);
     }
-  }, []);
+  }, [currentUser]);
 
   const rehydrateServerWithLocalRecords = useCallback(async (records: FileRecord[]) => {
     if (!records || records.length === 0) return;
@@ -269,12 +274,35 @@ export default function App() {
       if (activeCategory !== 'all') query.append('category', activeCategory);
       if (sortOption) query.append('sort', sortOption);
 
+      const headers: Record<string, string> = {};
+      if (currentUser) {
+        headers['x-username'] = currentUser.username;
+        headers['x-user-role'] = currentUser.role;
+      }
+
       const res = await fetch(`/api/files?${query.toString()}`, {
         signal: controller.signal,
+        headers,
       });
 
       if (res.ok) {
-        const data = await res.json();
+        let data = await res.json();
+
+        // Client-side guard: filter out avatar files/folders for non-administrators
+        if (currentUser?.role !== 'administrator' && Array.isArray(data)) {
+          data = data.filter((r: FileRecord) => {
+            const isAvatarFile =
+              r.tags?.includes('avatar') ||
+              r.tags?.includes('user-pfp') ||
+              r.id?.startsWith('avatar-') ||
+              r.originalName?.startsWith('Avatar_') ||
+              r.folderPath === 'avatar' ||
+              r.folderPath?.startsWith('avatar/');
+            const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
+            return !isAvatarFile && !isAvatarFolder;
+          });
+        }
+
         if (Array.isArray(data) && data.length > 0) {
           setFiles(data);
           idbSaveRecords(data);
@@ -284,9 +312,23 @@ export default function App() {
         } else {
           // Server returned empty list. Restore from IndexedDB persistent storage
           const localRecords = await idbGetAllRecords();
-          if (localRecords && localRecords.length > 0) {
-            setFiles(localRecords);
-            rehydrateServerWithLocalRecords(localRecords);
+          const filteredLocal = currentUser?.role === 'administrator'
+            ? localRecords
+            : localRecords.filter((r) => {
+                const isAvatarFile =
+                  r.tags?.includes('avatar') ||
+                  r.tags?.includes('user-pfp') ||
+                  r.id?.startsWith('avatar-') ||
+                  r.originalName?.startsWith('Avatar_') ||
+                  r.folderPath === 'avatar' ||
+                  r.folderPath?.startsWith('avatar/');
+                const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
+                return !isAvatarFile && !isAvatarFolder;
+              });
+
+          if (filteredLocal && filteredLocal.length > 0) {
+            setFiles(filteredLocal);
+            rehydrateServerWithLocalRecords(filteredLocal);
           } else {
             setFiles([]);
             try {
@@ -307,7 +349,7 @@ export default function App() {
         setIsRefreshing(false);
       }
     }
-  }, [debouncedSearchTerm, activeCategory, sortOption, rehydrateServerWithLocalRecords]);
+  }, [debouncedSearchTerm, activeCategory, sortOption, currentUser, rehydrateServerWithLocalRecords]);
 
   useEffect(() => {
     fetchFiles();

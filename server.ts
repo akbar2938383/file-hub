@@ -372,6 +372,19 @@ function getMetadata(): FileRecord[] {
     let modified = false;
 
     records.forEach((r) => {
+      // Auto-migrate avatar/pfp files into folderPath: "avatar"
+      const isAvatarFile =
+        r.tags?.includes("avatar") ||
+        r.tags?.includes("user-pfp") ||
+        r.id?.startsWith("avatar-") ||
+        r.originalName?.startsWith("Avatar_");
+
+      if (isAvatarFile && !r.isFolder && r.folderPath !== "avatar") {
+        r.folderPath = "avatar";
+        r.relativePath = `avatar/${r.originalName}`;
+        modified = true;
+      }
+
       if (r.folderPath) {
         const cleanFolderPath = r.folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
         if (cleanFolderPath !== r.folderPath) {
@@ -391,6 +404,30 @@ function getMetadata(): FileRecord[] {
         }
       }
     });
+
+    // Ensure system avatar folder exists in root
+    const hasAvatarFolder = records.some(
+      (r) => r.isFolder && r.originalName.toLowerCase() === "avatar" && (r.folderPath || "") === ""
+    );
+    if (!hasAvatarFolder) {
+      records.unshift({
+        id: "folder-avatar",
+        originalName: "avatar",
+        filename: "",
+        size: 0,
+        mimeType: "inode/directory",
+        uploadDate: new Date().toISOString(),
+        category: "folder",
+        tags: ["avatar", "system-folder"],
+        description: "User profile pictures avatar directory",
+        downloadCount: 0,
+        uploadedBy: "administrator",
+        uploadedByRole: "administrator",
+        isFolder: true,
+        folderPath: "",
+      });
+      modified = true;
+    }
 
     if (modified) {
       saveMetadata(records);
@@ -640,9 +677,10 @@ app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
 
   // Also register image in metadata so it exists in FileVault
   const category = detectCategory(file.mimetype || "image/png", file.originalname);
+  const cleanName = `Avatar_${users[index].username}_${file.originalname}`;
   const record: FileRecord = {
     id: recordId,
-    originalName: `Avatar_${users[index].username}_${file.originalname}`,
+    originalName: cleanName,
     filename: file.filename,
     size: file.size,
     mimeType: file.mimetype || "image/png",
@@ -653,6 +691,8 @@ app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
     downloadCount: 0,
     uploadedBy: users[index].username,
     uploadedByRole: users[index].role,
+    folderPath: "avatar",
+    relativePath: `avatar/${cleanName}`,
   };
 
   const existingRecords = getMetadata();
@@ -974,7 +1014,23 @@ app.post("/api/files/rehydrate", upload.single("file"), (req, res) => {
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
   const { search, category, sort } = req.query;
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
   let records = getMetadata();
+
+  // Non-administrators must NEVER see avatar files or the system avatar folder in storage
+  if (requesterRole !== "administrator") {
+    records = records.filter((r) => {
+      const isAvatarFile =
+        r.tags?.includes("avatar") ||
+        r.tags?.includes("user-pfp") ||
+        r.id?.startsWith("avatar-") ||
+        r.originalName?.startsWith("Avatar_") ||
+        r.folderPath === "avatar" ||
+        r.folderPath?.startsWith("avatar/");
+      const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === "avatar";
+      return !isAvatarFile && !isAvatarFolder;
+    });
+  }
 
   if (category && typeof category === "string" && category !== "all") {
     // Preserve folder containers when filtering by category
@@ -1009,11 +1065,27 @@ app.get("/api/files", (req, res) => {
 });
 
 // 2. Storage Stats
-app.get("/api/files/stats", (_req, res) => {
-  const records = getMetadata();
-  const totalFiles = records.length;
-  const totalSize = records.reduce((acc, r) => acc + r.size, 0);
-  const totalDownloads = records.reduce((acc, r) => acc + r.downloadCount, 0);
+app.get("/api/files/stats", (req, res) => {
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  let records = getMetadata();
+
+  if (requesterRole !== "administrator") {
+    records = records.filter((r) => {
+      const isAvatarFile =
+        r.tags?.includes("avatar") ||
+        r.tags?.includes("user-pfp") ||
+        r.id?.startsWith("avatar-") ||
+        r.originalName?.startsWith("Avatar_") ||
+        r.folderPath === "avatar" ||
+        r.folderPath?.startsWith("avatar/");
+      const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === "avatar";
+      return !isAvatarFile && !isAvatarFolder;
+    });
+  }
+
+  const totalFiles = records.filter((r) => !r.isFolder).length;
+  const totalSize = records.filter((r) => !r.isFolder).reduce((acc, r) => acc + r.size, 0);
+  const totalDownloads = records.filter((r) => !r.isFolder).reduce((acc, r) => acc + r.downloadCount, 0);
 
   const categoryBreakdown: Record<string, { count: number; size: number }> = {
     image: { count: 0, size: 0 },
