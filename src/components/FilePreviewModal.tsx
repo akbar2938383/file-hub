@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileRecord } from '../types';
 import { formatBytes, formatDate } from '../utils/formatters';
 import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2, QrCode } from 'lucide-react';
+import { idbGetBlob } from '../lib/idb';
 
 interface Props {
   file: FileRecord | null;
@@ -18,8 +19,23 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
   const [textError, setTextError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedContent, setCopiedContent] = useState(false);
+  const [localMediaUrl, setLocalMediaUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    let isSubscribed = true;
+    let createdUrl: string | null = null;
+
+    if (file) {
+      idbGetBlob(file.id).then((blob) => {
+        if (isSubscribed && blob) {
+          createdUrl = URL.createObjectURL(blob);
+          setLocalMediaUrl(createdUrl);
+        }
+      });
+    } else {
+      setLocalMediaUrl(null);
+    }
+
     if (file && (file.category === 'code' || file.category === 'document' || file.mimeType.startsWith('text/'))) {
       setIsTextLoading(true);
       setTextError(null);
@@ -29,23 +45,44 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
           return res.json();
         })
         .then((data) => {
-          setTextContent(data.content);
-          setIsTextLoading(false);
+          if (isSubscribed) {
+            setTextContent(data.content);
+            setIsTextLoading(false);
+          }
         })
-        .catch(() => {
-          setTextContent(null);
-          setIsTextLoading(false);
-          setTextError('Inline text view not available for this format/size');
+        .catch(async () => {
+          if (file) {
+            const blob = await idbGetBlob(file.id);
+            if (blob && isSubscribed) {
+              const text = await blob.text();
+              setTextContent(text);
+              setIsTextLoading(false);
+              return;
+            }
+          }
+          if (isSubscribed) {
+            setTextContent(null);
+            setIsTextLoading(false);
+            setTextError('Inline text view not available for this format/size');
+          }
         });
     } else {
       setTextContent(null);
       setTextError(null);
     }
+
+    return () => {
+      isSubscribed = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
   }, [file]);
 
   if (!isOpen || !file) return null;
 
   const directViewUrl = `/api/files/${file.id}/view`;
+  const mediaUrl = localMediaUrl || directViewUrl;
   const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download`;
 
   const copyDownloadLink = () => {
@@ -67,7 +104,7 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
       return (
         <div className="flex items-center justify-center min-h-[300px] max-h-[500px] bg-slate-950 rounded-xl overflow-hidden p-2">
           <img
-            src={directViewUrl}
+            src={mediaUrl}
             alt={file.originalName}
             referrerPolicy="no-referrer"
             className="max-h-[480px] w-auto object-contain rounded-lg"
@@ -80,7 +117,7 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
       return (
         <div className="flex items-center justify-center bg-slate-950 rounded-xl overflow-hidden p-2">
           <video controls className="max-h-[450px] w-full rounded-lg">
-            <source src={directViewUrl} type={file.mimeType} />
+            <source src={mediaUrl} type={file.mimeType} />
             Your browser does not support the video tag.
           </video>
         </div>
@@ -95,7 +132,7 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
           </div>
           <p className="text-sm text-slate-300 font-medium">{file.originalName}</p>
           <audio controls className="w-full max-w-md">
-            <source src={directViewUrl} type={file.mimeType} />
+            <source src={mediaUrl} type={file.mimeType} />
             Your browser does not support the audio element.
           </audio>
         </div>

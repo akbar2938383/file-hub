@@ -151,8 +151,8 @@ export const WallpaperChangerPage: React.FC<Props> = ({
   return (
     <div className="max-w-7xl mx-auto py-6 px-4 space-y-8">
       
-      {/* Page Header Banner */}
-      <div className="relative rounded-3xl bg-slate-900/90 text-white p-6 sm:p-8 overflow-hidden shadow-2xl border border-slate-800 backdrop-blur-md">
+      {/* Combined Header & Live Wallpaper Mode Banner */}
+      <div className="relative rounded-3xl bg-slate-900/90 text-white p-6 sm:p-8 overflow-hidden shadow-2xl border border-slate-800 backdrop-blur-md space-y-6">
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
 
@@ -183,172 +183,163 @@ export const WallpaperChangerPage: React.FC<Props> = ({
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
               <span>Live Public Sync: <strong>ON</strong></span>
             </div>
-            <button
-              onClick={onRefreshWallpaper}
-              className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
-              title="Refresh Wallpaper"
-            >
-              <RefreshCw className="w-4 h-4 text-white" />
-            </button>
           </div>
         </div>
-      </div>
 
-      {/* Live Wallpaper Toggle Banner */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-500/30 shadow-2xl backdrop-blur-md">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-indigo-500/20 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner">
-              <Zap className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-lg text-white">Live Animated Wallpaper Mode</h3>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-500 text-white uppercase tracking-wider shadow-sm">
-                  60 FPS Engine
-                </span>
+        {/* Divider */}
+        <div className="relative z-10 border-t border-white/10" />
+
+        {/* Live Wallpaper Mode Section */}
+        <div className="relative z-10 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-500/20 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner">
+                <Zap className="w-6 h-6 animate-pulse" />
               </div>
-              <p className="text-xs text-slate-300">
-                Toggle live dynamic canvas animations or streaming videos across all background screens.
-              </p>
+              <div>
+                <h3 className="font-bold text-lg text-white">Live Animated Wallpaper Mode</h3>
+                <p className="text-xs text-slate-300">
+                  Toggle live dynamic canvas animations or streaming videos across all background screens.
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Toggle Switch Button */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-slate-300">
-              Live Mode: <span className={isLive ? 'text-indigo-400 font-extrabold' : 'text-slate-400'}>{isLive ? 'ACTIVE' : 'OFF'}</span>
-            </span>
-            <button
-              type="button"
-              id="toggle-live-wallpaper-btn"
-              onClick={() => {
-                if (!isAdmin) {
-                  showToast('Log in as Administrator to toggle Live Wallpaper mode', 'error');
-                  return;
-                }
-                const nextState = !isLive;
-                setIsLive(nextState);
-                handleApplyWallpaper(
-                  selectedUrl,
-                  nextState ? `✨ Live ${liveType.toUpperCase()} Wallpaper` : selectedName,
-                  blur,
-                  opacity,
-                  brightness,
-                  nextState,
-                  liveType,
-                  videoUrl
-                );
-              }}
-              className={`relative inline-flex h-8 w-16 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                isLive ? 'bg-indigo-500' : 'bg-slate-700'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                  isLive ? 'translate-x-8' : 'translate-x-0'
+            {/* Toggle Switch Button */}
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xs font-bold text-slate-300">
+                Live Mode: <span className={isLive ? 'text-indigo-400 font-extrabold' : 'text-slate-400'}>{isLive ? 'ACTIVE' : 'OFF'}</span>
+              </span>
+              <button
+                type="button"
+                id="toggle-live-wallpaper-btn"
+                onClick={() => {
+                  if (!isAdmin) {
+                    showToast('Log in as Administrator to toggle Live Wallpaper mode', 'error');
+                    return;
+                  }
+                  const nextState = !isLive;
+                  setIsLive(nextState);
+                  handleApplyWallpaper(
+                    selectedUrl,
+                    nextState ? `✨ Live ${liveType.toUpperCase()} Wallpaper` : selectedName,
+                    blur,
+                    opacity,
+                    brightness,
+                    nextState,
+                    liveType,
+                    videoUrl
+                  );
+                }}
+                className={`relative inline-flex h-8 w-16 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  isLive ? 'bg-indigo-500' : 'bg-slate-700'
                 }`}
-              />
-            </button>
+              >
+                <span
+                  className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    isLive ? 'translate-x-8' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Live Animation Themes Selector */}
-        {isLive && (
-          <div className="pt-5 space-y-4 animate-in fade-in duration-300">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">
-                Select Live Animation Theme:
-              </p>
-              {liveType === 'video' && (
-                <span className="text-[11px] text-cyan-400 font-medium">Playing looping video feed</span>
-              )}
-            </div>
+          {/* Live Animation Themes Selector */}
+          {isLive && (
+            <div className="pt-5 space-y-4 animate-in fade-in duration-300">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">
+                  Select Live Animation Theme:
+                </p>
+                {liveType === 'video' && (
+                  <span className="text-[11px] text-cyan-400 font-medium">Playing looping video feed</span>
+                )}
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2.5">
-              {[
-                { key: 'aurora', label: 'Aurora Wave', icon: Sparkles },
-                { key: 'particles', label: 'Cosmic Stars', icon: Layers },
-                { key: 'nebula', label: 'Nebula Glow', icon: Eye },
-                { key: 'matrix', label: 'Matrix Code', icon: Globe },
-                { key: 'waves', label: 'Fluid Wave', icon: RefreshCw },
-                { key: 'cybergrid', label: 'Cyber Grid', icon: Sliders },
-                { key: 'video', label: 'MP4 Video', icon: Play },
-              ].map((item) => {
-                const Icon = item.icon;
-                const isSelected = liveType === item.key;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    id={`live-type-btn-${item.key}`}
-                    onClick={() => {
-                      if (!isAdmin) {
-                        showToast('Log in as Administrator to change live theme', 'error');
-                        return;
-                      }
-                      const newType = item.key as LiveType;
-                      setLiveType(newType);
-                      handleApplyWallpaper(
-                        selectedUrl,
-                        `✨ Live ${item.label} Theme`,
-                        blur,
-                        opacity,
-                        brightness,
-                        true,
-                        newType,
-                        videoUrl
-                      );
-                    }}
-                    className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 text-xs font-semibold ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg scale-105 ring-2 ring-indigo-400/50'
-                        : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {liveType === 'video' && (
-              <div className="pt-3 space-y-2 max-w-xl">
-                <label className="text-xs font-medium text-slate-300">Custom MP4 / WebM Video Direct Link:</label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={videoUrl}
-                    onChange={(e) => setVideoUrl(e.target.value)}
-                    placeholder="https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-1610-large.mp4"
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (videoUrl.trim()) {
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2.5">
+                {[
+                  { key: 'aurora', label: 'Aurora Wave', icon: Sparkles },
+                  { key: 'particles', label: 'Cosmic Stars', icon: Layers },
+                  { key: 'nebula', label: 'Nebula Glow', icon: Eye },
+                  { key: 'matrix', label: 'Matrix Code', icon: Globe },
+                  { key: 'waves', label: 'Fluid Wave', icon: RefreshCw },
+                  { key: 'cybergrid', label: 'Cyber Grid', icon: Sliders },
+                  { key: 'video', label: 'MP4 Video', icon: Play },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isSelected = liveType === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      id={`live-type-btn-${item.key}`}
+                      onClick={() => {
+                        if (!isAdmin) {
+                          showToast('Log in as Administrator to change live theme', 'error');
+                          return;
+                        }
+                        const newType = item.key as LiveType;
+                        setLiveType(newType);
                         handleApplyWallpaper(
                           selectedUrl,
-                          '✨ Live Custom MP4 Video',
+                          `✨ Live ${item.label} Theme`,
                           blur,
                           opacity,
                           brightness,
                           true,
-                          'video',
-                          videoUrl.trim()
+                          newType,
+                          videoUrl
                         );
-                      }
-                    }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-colors"
-                  >
-                    Apply Video
-                  </button>
-                </div>
+                      }}
+                      className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 text-xs font-semibold ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg scale-105 ring-2 ring-indigo-400/50'
+                          : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        )}
+
+              {liveType === 'video' && (
+                <div className="pt-3 space-y-2 max-w-xl">
+                  <label className="text-xs font-medium text-slate-300">Custom MP4 / WebM Video Direct Link:</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={videoUrl}
+                      onChange={(e) => setVideoUrl(e.target.value)}
+                      placeholder="https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-1610-large.mp4"
+                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (videoUrl.trim()) {
+                          handleApplyWallpaper(
+                            selectedUrl,
+                            '✨ Live Custom MP4 Video',
+                            blur,
+                            opacity,
+                            brightness,
+                            true,
+                            'video',
+                            videoUrl.trim()
+                          );
+                        }
+                      }}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-colors"
+                    >
+                      Apply Video
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Active Wallpaper Preview Bar */}
@@ -600,15 +591,7 @@ export const WallpaperChangerPage: React.FC<Props> = ({
                 </div>
               )}
             </>
-          ) : (
-            <div className="p-8 rounded-3xl bg-indigo-950/40 border border-indigo-500/20 text-center text-slate-300 backdrop-blur-md">
-              <Sparkles className="w-8 h-8 text-indigo-400 mx-auto mb-3 animate-bounce" />
-              <h4 className="font-bold text-base text-white mb-1">Live Animated Wallpaper Mode Active</h4>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Static image presets and custom uploads are hidden while Live Animated Wallpaper mode is active. Select your desired animation theme or video feed from the options above.
-              </p>
-            </div>
-          )}
+          ) : null}
 
         </div>
 

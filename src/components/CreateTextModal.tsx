@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileCode, X, Plus, AlertCircle, Loader2 } from 'lucide-react';
 import { User } from '../types';
+import { idbSaveRecord, idbSaveBlob } from '../lib/idb';
 
 interface Props {
   isOpen: boolean;
@@ -52,6 +53,13 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || 'Failed to create file');
+      }
+
+      const resData = await res.json();
+      if (resData.file) {
+        await idbSaveRecord(resData.file);
+        const textBlob = new Blob([content], { type: 'text/plain' });
+        await idbSaveBlob(resData.file.id, textBlob);
       }
 
       setIsLoading(false);

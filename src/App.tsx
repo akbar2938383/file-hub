@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings } from './types';
+import { idbSaveRecords, idbGetAllRecords, idbGetBlob, idbDeleteRecord, idbDeleteRecords } from './lib/idb';
 import { Navbar } from './components/Navbar';
 import { StorageSummaryCard } from './components/StorageSummaryCard';
 import { FileList } from './components/FileList';
@@ -209,6 +210,49 @@ export default function App() {
     }
   }, []);
 
+  const rehydrateServerWithLocalRecords = useCallback(async (records: FileRecord[]) => {
+    if (!records || records.length === 0) return;
+    try {
+      await fetch('/api/files/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: records }),
+      });
+    } catch (e) {
+      console.error('Metadata sync failed during rehydration:', e);
+    }
+
+    for (const record of records) {
+      if (record.isFolder) continue;
+      try {
+        const blob = await idbGetBlob(record.id);
+        if (blob) {
+          const formData = new FormData();
+          formData.append('file', blob, record.originalName);
+          formData.append('id', record.id);
+          formData.append('originalName', record.originalName);
+          formData.append('filename', record.filename || '');
+          formData.append('folderPath', record.folderPath || '');
+          formData.append('relativePath', record.relativePath || record.originalName);
+          formData.append('category', record.category);
+          formData.append('mimeType', record.mimeType);
+          formData.append('uploadedBy', record.uploadedBy || 'public');
+          formData.append('uploadedByRole', record.uploadedByRole || 'normal');
+          formData.append('description', record.description || '');
+          formData.append('tags', JSON.stringify(record.tags || []));
+          formData.append('uploadDate', record.uploadDate);
+
+          await fetch('/api/files/rehydrate', {
+            method: 'POST',
+            body: formData,
+          });
+        }
+      } catch (err) {
+        console.error(`Failed rehydrating file ${record.originalName}:`, err);
+      }
+    }
+  }, []);
+
   const fetchFiles = useCallback(async () => {
     // Abort previous in-flight file fetch request if present
     if (abortControllerRef.current) {
@@ -231,16 +275,28 @@ export default function App() {
 
       if (res.ok) {
         const data = await res.json();
-        setFiles(data);
-        if (Array.isArray(data)) {
+        if (Array.isArray(data) && data.length > 0) {
+          setFiles(data);
+          idbSaveRecords(data);
           try {
             localStorage.setItem('vault_files_backup', JSON.stringify(data));
           } catch (e) {}
+        } else {
+          // Server returned empty list. Restore from IndexedDB persistent storage
+          const localRecords = await idbGetAllRecords();
+          if (localRecords && localRecords.length > 0) {
+            setFiles(localRecords);
+            rehydrateServerWithLocalRecords(localRecords);
+          } else {
+            setFiles([]);
+            try {
+              localStorage.setItem('vault_files_backup', JSON.stringify([]));
+            } catch (e) {}
+          }
         }
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        // Request was cancelled due to a newer request, ignore quietly
         return;
       }
       console.error('Error fetching files:', err);
@@ -251,7 +307,7 @@ export default function App() {
         setIsRefreshing(false);
       }
     }
-  }, [debouncedSearchTerm, activeCategory, sortOption]);
+  }, [debouncedSearchTerm, activeCategory, sortOption, rehydrateServerWithLocalRecords]);
 
   useEffect(() => {
     fetchFiles();
@@ -346,6 +402,7 @@ export default function App() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Bulk delete failed');
 
+        await idbDeleteRecords(selectedIds);
         showToast(data.message || `${selectedIds.length} file(s) deleted successfully`);
         setSelectedIds([]);
         fetchFiles();
@@ -365,6 +422,7 @@ export default function App() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Delete failed');
 
+        await idbDeleteRecord(deleteTarget.id);
         showToast(data.message || 'File deleted successfully');
         setSelectedIds((prev) => prev.filter((i) => i !== deleteTarget.id));
         fetchFiles();
@@ -620,22 +678,10 @@ export default function App() {
             </main>
           )}
         </div>
-
-        {/* Footer */}
-        <footer className="py-6 px-4 border-t border-slate-200/40 dark:border-slate-800/40 text-center text-xs text-slate-500 dark:text-slate-400 backdrop-blur-md bg-white/20 dark:bg-slate-900/20">
-          <p>
-            File Vault Hub &bull; Logged in as:{' '}
-            <strong className="text-slate-800 dark:text-slate-200">
-              {currentUser ? `${currentUser.fullName} (${currentUser.role})` : 'Public Guest'}
-            </strong>{' '}
-            &bull; Watermark:{' '}
-            <span className="font-mono font-bold text-blue-600 dark:text-blue-400">akbar293838</span>
-          </p>
-        </footer>
       </div>
 
       {/* Floating persistent Watermark */}
-      <div className="fixed bottom-3 right-3 z-50 pointer-events-none select-none opacity-50 hover:opacity-100 transition-opacity">
+      <div className="fixed bottom-3 right-3 z-50 pointer-events-none select-none opacity-60 hover:opacity-100 transition-opacity">
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 dark:bg-slate-900/90 text-white border border-slate-700/80 shadow-lg backdrop-blur-md text-[11px] font-mono">
           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           <span className="tracking-wider text-slate-200">akbar293838</span>

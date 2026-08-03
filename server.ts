@@ -34,6 +34,11 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+const TEMP_CHUNKS_DIR = path.join(UPLOADS_DIR, "temp_chunks");
+if (!fs.existsSync(TEMP_CHUNKS_DIR)) {
+  fs.mkdirSync(TEMP_CHUNKS_DIR, { recursive: true });
+}
+
 const METADATA_FILE = path.join(UPLOADS_DIR, "metadata.json");
 const USERS_FILE = path.join(UPLOADS_DIR, "users.json");
 const SETTINGS_FILE = path.join(UPLOADS_DIR, "settings.json");
@@ -864,12 +869,6 @@ app.post("/api/files/sync", (req, res) => {
     // Do not restore items that were explicitly deleted
     if (deletedIds.has(cf.id)) continue;
 
-    // Do not restore non-folder files whose binary upload does not exist
-    if (!cf.isFolder && cf.filename) {
-      const filePath = path.join(UPLOADS_DIR, cf.filename);
-      if (!fs.existsSync(filePath)) continue;
-    }
-
     const existing = currentRecords.find((r) => r.id === cf.id);
     if (!existing) {
       currentRecords.push(cf);
@@ -882,6 +881,94 @@ app.post("/api/files/sync", (req, res) => {
   }
 
   res.json({ message: "File metadata synchronized", records: currentRecords });
+});
+
+// Rehydrate missing binary file from client IndexedDB backup
+app.post("/api/files/rehydrate", upload.single("file"), (req, res) => {
+  const file = req.file;
+  const {
+    id,
+    originalName,
+    filename,
+    folderPath = "",
+    relativePath = "",
+    category,
+    mimeType,
+    uploadedBy = "public",
+    uploadedByRole = "normal",
+    description = "",
+    tags,
+    uploadDate,
+  } = req.body;
+
+  if (!id || !originalName) {
+    return res.status(400).json({ error: "Missing required rehydration metadata" });
+  }
+
+  const existingRecords = getMetadata();
+  const deletedIds = getDeletedIds();
+  if (deletedIds.has(id)) {
+    return res.status(400).json({ error: "File was previously deleted" });
+  }
+
+  let targetFilename = filename || (file ? file.filename : "");
+  if (file && filename && file.filename !== filename) {
+    const targetPath = path.join(UPLOADS_DIR, filename);
+    try {
+      fs.renameSync(file.path, targetPath);
+      targetFilename = filename;
+    } catch (e) {
+      targetFilename = file.filename;
+    }
+  }
+
+  const relPath = relativePath || originalName;
+  const { fileFolderPath, createdFolders } = ensureFolderHierarchy(
+    existingRecords,
+    folderPath,
+    relPath,
+    uploadedBy,
+    (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal"
+  );
+
+  let parsedTags: string[] = [];
+  if (tags) {
+    try {
+      parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
+    } catch {
+      parsedTags = [];
+    }
+  }
+
+  const record: FileRecord = {
+    id,
+    originalName,
+    filename: targetFilename,
+    size: file ? file.size : Number(req.body.size || 0),
+    mimeType: mimeType || (file ? file.mimetype : "application/octet-stream"),
+    uploadDate: uploadDate || new Date().toISOString(),
+    category: category || detectCategory(mimeType || "", originalName),
+    tags: parsedTags,
+    description: description || "",
+    downloadCount: Number(req.body.downloadCount || 0),
+    uploadedBy,
+    uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+    folderPath: fileFolderPath,
+    relativePath: relPath,
+  };
+
+  const existingIndex = existingRecords.findIndex((r) => r.id === id);
+  if (existingIndex !== -1) {
+    existingRecords[existingIndex] = record;
+  } else {
+    existingRecords.unshift(record);
+  }
+
+  const updatedRecords = [...createdFolders, ...existingRecords];
+  const finalRecords = updatedRecords.filter((r, idx, self) => self.findIndex((x) => x.id === r.id) === idx);
+  saveMetadata(finalRecords);
+
+  res.status(200).json({ message: "File rehydrated successfully", file: record });
 });
 
 // 1. Get all files with filtering & search
@@ -1154,6 +1241,121 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
     message: `${newRecords.length} file(s) uploaded successfully`,
     uploadedFiles: newRecords,
     createdFolders: newlyCreatedFolders,
+  });
+});
+
+// 3b. Upload File Chunk (Resumable Chunked Upload)
+app.post("/api/files/upload-chunk", upload.single("chunk"), (req, res) => {
+  const file = req.file;
+  const { uploadId, chunkIndex, totalChunks } = req.body;
+
+  if (!file || !uploadId || chunkIndex === undefined || totalChunks === undefined) {
+    return res.status(400).json({ error: "Missing chunk upload parameters" });
+  }
+
+  const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
+  if (!fs.existsSync(chunkDir)) {
+    fs.mkdirSync(chunkDir, { recursive: true });
+  }
+
+  const chunkPath = path.join(chunkDir, `chunk-${chunkIndex}`);
+  fs.renameSync(file.path, chunkPath);
+
+  res.json({ message: `Chunk ${chunkIndex} received`, chunkIndex: Number(chunkIndex) });
+});
+
+// 3c. Complete Chunked Upload
+app.post("/api/files/upload-complete", (req, res) => {
+  const {
+    uploadId,
+    totalChunks,
+    originalName,
+    relativePath = "",
+    folderPath = "",
+    fileSize = 0,
+    mimeType = "application/octet-stream",
+  } = req.body;
+
+  if (!uploadId || totalChunks === undefined || !originalName) {
+    return res.status(400).json({ error: "Missing upload complete parameters" });
+  }
+
+  const chunkDir = path.join(TEMP_CHUNKS_DIR, uploadId);
+  if (!fs.existsSync(chunkDir)) {
+    return res.status(400).json({ error: "Chunk data not found or expired" });
+  }
+
+  const total = Number(totalChunks);
+  for (let i = 0; i < total; i++) {
+    const cp = path.join(chunkDir, `chunk-${i}`);
+    if (!fs.existsSync(cp)) {
+      return res.status(400).json({ error: `Missing chunk ${i}` });
+    }
+  }
+
+  const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
+  const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
+
+  const cleanOriginalName = path.basename(originalName.replace(/\\/g, "/"));
+  const ext = path.extname(cleanOriginalName);
+  const uniqueId = crypto.randomUUID();
+  const finalFilename = `${Date.now()}-${uniqueId.slice(0, 8)}${ext}`;
+  const finalFilePath = path.join(UPLOADS_DIR, finalFilename);
+
+  // Stitch chunks sequentially
+  const writeStream = fs.createWriteStream(finalFilePath);
+  for (let i = 0; i < total; i++) {
+    const cp = path.join(chunkDir, `chunk-${i}`);
+    const chunkData = fs.readFileSync(cp);
+    writeStream.write(chunkData);
+    try {
+      fs.unlinkSync(cp);
+    } catch (e) {}
+  }
+  writeStream.end();
+
+  try {
+    fs.rmdirSync(chunkDir, { recursive: true });
+  } catch (e) {}
+
+  const relPath = relativePath || cleanOriginalName;
+  const existingRecords = getMetadata();
+
+  const { fileFolderPath, createdFolders } = ensureFolderHierarchy(
+    existingRecords,
+    folderPath,
+    relPath,
+    uploadedBy,
+    (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal"
+  );
+
+  const stats = fs.statSync(finalFilePath);
+  const category = detectCategory(mimeType, cleanOriginalName);
+
+  const record: FileRecord = {
+    id: uniqueId,
+    originalName: cleanOriginalName,
+    filename: finalFilename,
+    size: stats.size || Number(fileSize),
+    mimeType: mimeType || "application/octet-stream",
+    uploadDate: new Date().toISOString(),
+    category,
+    tags: [],
+    description: "",
+    downloadCount: 0,
+    uploadedBy,
+    uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
+    folderPath: fileFolderPath,
+    relativePath: relPath,
+  };
+
+  const updatedRecords = [record, ...createdFolders, ...existingRecords];
+  saveMetadata(updatedRecords);
+
+  res.status(201).json({
+    message: "File upload completed successfully",
+    uploadedFile: record,
+    createdFolders,
   });
 });
 
@@ -1654,9 +1856,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
+  server.timeout = 0;
+  server.keepAliveTimeout = 300000;
+  server.headersTimeout = 305000;
 }
 
 startServer();
