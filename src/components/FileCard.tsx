@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileRecord, ViewMode, User } from '../types';
 import { formatBytes, formatDate, getCategoryBadgeColor } from '../utils/formatters';
 import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode, ShieldCheck, Lock, Folder, FolderOpen } from 'lucide-react';
+import { idbGetBlob } from '../lib/idb';
 
 interface Props {
   file: FileRecord;
@@ -65,6 +66,22 @@ export const FileCard: React.FC<Props> = ({
   const directViewUrl = `/api/files/${file.id}/view`;
   const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download`;
 
+  const [imgSrc, setImgSrc] = useState<string>(directViewUrl);
+
+  useEffect(() => {
+    setImgSrc(`/api/files/${file.id}/view`);
+  }, [file.id]);
+
+  const handleImageError = async () => {
+    try {
+      const blob = await idbGetBlob(file.id);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        setImgSrc(url);
+      }
+    } catch (e) {}
+  };
+
   const copyShareLink = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(directDownloadUrl);
@@ -91,9 +108,10 @@ export const FileCard: React.FC<Props> = ({
               <FolderOpen className="w-5 h-5 text-amber-500 dark:text-amber-400" />
             ) : file.category === 'image' ? (
               <img
-                src={directViewUrl}
+                src={imgSrc}
                 alt={file.originalName}
                 referrerPolicy="no-referrer"
+                onError={handleImageError}
                 className="w-full h-full object-cover"
               />
             ) : (
@@ -248,9 +266,10 @@ export const FileCard: React.FC<Props> = ({
           </div>
         ) : file.category === 'image' ? (
           <img
-            src={directViewUrl}
+            src={imgSrc}
             alt={file.originalName}
             referrerPolicy="no-referrer"
+            onError={handleImageError}
             className="w-full h-full object-cover"
           />
         ) : (

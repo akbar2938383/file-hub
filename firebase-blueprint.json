@@ -1,0 +1,38 @@
+{
+  "entities": {
+    "files": {
+      "title": "File Records",
+      "description": "Uploaded files and folder metadata in FileVault",
+      "fields": {
+        "id": { "type": "string", "description": "Unique file ID" },
+        "originalName": { "type": "string", "description": "Original filename" },
+        "filename": { "type": "string", "description": "Stored physical filename on disk" },
+        "size": { "type": "number", "description": "File size in bytes" },
+        "mimeType": { "type": "string", "description": "MIME type" },
+        "uploadDate": { "type": "string", "description": "ISO timestamp of upload" },
+        "category": { "type": "string", "description": "File category tag" },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags" },
+        "description": { "type": "string", "description": "Optional description" },
+        "downloadCount": { "type": "number", "description": "Total download count" },
+        "uploadedBy": { "type": "string", "description": "Username of uploader" },
+        "uploadedByRole": { "type": "string", "description": "Role of uploader" },
+        "isFolder": { "type": "boolean", "description": "Whether item is a directory" },
+        "folderPath": { "type": "string", "description": "Parent folder path" },
+        "relativePath": { "type": "string", "description": "Full relative path" }
+      }
+    },
+    "users": {
+      "title": "User Accounts",
+      "description": "Registered system user accounts",
+      "fields": {
+        "id": { "type": "string", "description": "User ID" },
+        "username": { "type": "string", "description": "Username" },
+        "password": { "type": "string", "description": "User password" },
+        "role": { "type": "string", "description": "administrator or normal" },
+        "fullName": { "type": "string", "description": "User full name" },
+        "avatar": { "type": "string", "description": "Avatar URL" },
+        "createdAt": { "type": "string", "description": "Registration ISO timestamp" }
+      }
+    }
+  }
+}

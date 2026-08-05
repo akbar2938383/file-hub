@@ -5,6 +5,16 @@ import crypto from "crypto";
 import multer from "multer";
 import JSZip from "jszip";
 import { createServer as createViteServer } from "vite";
+import { initializeApp, getApps } from "firebase/app";
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDocs,
+  getDoc,
+  collection,
+  deleteDoc
+} from "firebase/firestore";
 
 interface FileRecord {
   id: string;
@@ -65,6 +75,203 @@ function addDeletedIds(ids: string[]) {
     fs.writeFileSync(DELETED_IDS_FILE, JSON.stringify(Array.from(current), null, 2), "utf-8");
   } catch (err) {
     console.error("Error saving deleted ids:", err);
+  }
+}
+
+// --- FIREBASE FIRESTORE PERSISTENT STORAGE ---
+let firestoreDb: ReturnType<typeof getFirestore> | null = null;
+
+function getDb() {
+  if (firestoreDb) return firestoreDb;
+  try {
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      if (config.apiKey && config.projectId) {
+        const apps = getApps();
+        const firebaseApp = apps.length > 0 ? apps[0] : initializeApp({
+          apiKey: config.apiKey,
+          authDomain: config.authDomain,
+          projectId: config.projectId,
+          storageBucket: config.storageBucket,
+          messagingSenderId: config.messagingSenderId,
+          appId: config.appId,
+        });
+        firestoreDb = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)"
+          ? getFirestore(firebaseApp, config.firestoreDatabaseId)
+          : getFirestore(firebaseApp);
+        console.log("Firebase Firestore initialized with database ID:", config.firestoreDatabaseId || "(default)");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to initialize Firebase Firestore:", err);
+  }
+  return firestoreDb;
+}
+
+function syncSaveMetadataToFirestore(records: FileRecord[]) {
+  const db = getDb();
+  if (!db) return;
+  Promise.resolve().then(async () => {
+    try {
+      for (const r of records) {
+        // Clean undefined values for Firestore compatibility
+        const cleanDoc = JSON.parse(JSON.stringify(r));
+        await setDoc(doc(db, "files", r.id), cleanDoc, { merge: true });
+      }
+    } catch (err) {
+      console.error("Error syncing metadata to Firestore:", err);
+    }
+  });
+}
+
+function syncDeleteMetadataFromFirestore(ids: string[]) {
+  const db = getDb();
+  if (!db) return;
+  Promise.resolve().then(async () => {
+    try {
+      for (const id of ids) {
+        await deleteDoc(doc(db, "files", id));
+      }
+    } catch (err) {
+      console.error("Error deleting metadata from Firestore:", err);
+    }
+  });
+}
+
+function syncSaveUsersToFirestore(users: UserRecord[]) {
+  const db = getDb();
+  if (!db) return;
+  Promise.resolve().then(async () => {
+    try {
+      for (const u of users) {
+        const cleanUser = JSON.parse(JSON.stringify(u));
+        await setDoc(doc(db, "users", u.id), cleanUser, { merge: true });
+      }
+    } catch (err) {
+      console.error("Error syncing users to Firestore:", err);
+    }
+  });
+}
+
+function syncSaveSettingsToFirestore(settings: SettingsRecord) {
+  const db = getDb();
+  if (!db) return;
+  Promise.resolve().then(async () => {
+    try {
+      const cleanSettings = JSON.parse(JSON.stringify(settings));
+      await setDoc(doc(db, "settings", "active"), cleanSettings, { merge: true });
+    } catch (err) {
+      console.error("Error syncing settings to Firestore:", err);
+    }
+  });
+}
+
+async function syncFromFirestore() {
+  const db = getDb();
+  if (!db) return;
+
+  try {
+    console.log("Syncing persistent cloud state from Firestore...");
+
+    // 1. Files Sync
+    const filesSnap = await getDocs(collection(db, "files"));
+    if (!filesSnap.empty) {
+      const remoteRecords: FileRecord[] = [];
+      filesSnap.forEach((docSnap) => {
+        remoteRecords.push(docSnap.data() as FileRecord);
+      });
+
+      let localRecords: FileRecord[] = [];
+      try {
+        if (fs.existsSync(METADATA_FILE)) {
+          localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
+        }
+      } catch (e) {}
+
+      let updated = false;
+      for (const rr of remoteRecords) {
+        const idx = localRecords.findIndex((r) => r.id === rr.id);
+        if (idx === -1) {
+          localRecords.push(rr);
+          updated = true;
+        } else {
+          localRecords[idx] = { ...localRecords[idx], ...rr };
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
+        console.log(`Synced ${localRecords.length} file records from Firestore.`);
+      }
+    } else {
+      // Seed initial local records to Firestore
+      let localRecords: FileRecord[] = [];
+      try {
+        if (fs.existsSync(METADATA_FILE)) {
+          localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
+          syncSaveMetadataToFirestore(localRecords);
+        }
+      } catch (e) {}
+    }
+
+    // 2. Users Sync
+    const usersSnap = await getDocs(collection(db, "users"));
+    if (!usersSnap.empty) {
+      const remoteUsers: UserRecord[] = [];
+      usersSnap.forEach((docSnap) => {
+        remoteUsers.push(docSnap.data() as UserRecord);
+      });
+
+      let localUsers: UserRecord[] = [];
+      try {
+        if (fs.existsSync(USERS_FILE)) {
+          localUsers = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
+        }
+      } catch (e) {}
+
+      let updatedUsers = false;
+      for (const ru of remoteUsers) {
+        const idx = localUsers.findIndex((u) => u.id === ru.id || u.username.toLowerCase() === ru.username.toLowerCase());
+        if (idx === -1) {
+          localUsers.push(ru);
+          updatedUsers = true;
+        } else {
+          localUsers[idx] = { ...localUsers[idx], ...ru };
+          updatedUsers = true;
+        }
+      }
+
+      if (updatedUsers) {
+        fs.writeFileSync(USERS_FILE, JSON.stringify(localUsers, null, 2), "utf-8");
+      }
+    } else {
+      let localUsers: UserRecord[] = [];
+      try {
+        if (fs.existsSync(USERS_FILE)) {
+          localUsers = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
+          syncSaveUsersToFirestore(localUsers);
+        }
+      } catch (e) {}
+    }
+
+    // 3. Settings Sync
+    const settingsSnap = await getDoc(doc(db, "settings", "active"));
+    if (settingsSnap.exists()) {
+      const remoteSettings = settingsSnap.data() as SettingsRecord;
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(remoteSettings, null, 2), "utf-8");
+    } else {
+      try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+          const localSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+          syncSaveSettingsToFirestore(localSettings);
+        }
+      } catch (e) {}
+    }
+    console.log("Firestore cloud state sync complete.");
+  } catch (err) {
+    console.error("Error during Firestore sync:", err);
   }
 }
 
@@ -280,6 +487,7 @@ function getUsers(): UserRecord[] {
 function saveUsers(users: UserRecord[]) {
   try {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+    syncSaveUsersToFirestore(users);
   } catch (err) {
     console.error("Error saving users:", err);
   }
@@ -356,6 +564,7 @@ function getSettings(): SettingsRecord {
 function saveSettings(settings: SettingsRecord) {
   try {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+    syncSaveSettingsToFirestore(settings);
   } catch (err) {
     console.error("Error saving settings:", err);
   }
@@ -444,6 +653,7 @@ function getMetadata(): FileRecord[] {
 function saveMetadata(records: FileRecord[]) {
   try {
     fs.writeFileSync(METADATA_FILE, JSON.stringify(records, null, 2), "utf-8");
+    syncSaveMetadataToFirestore(records);
   } catch (err) {
     console.error("Error saving metadata:", err);
   }
@@ -1848,6 +2058,7 @@ app.delete("/api/files/:id", (req, res) => {
 
   const deleteSet = new Set(permittedItemsToDelete.map((r) => r.id));
   addDeletedIds(Array.from(deleteSet));
+  syncDeleteMetadataFromFirestore(Array.from(deleteSet));
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
@@ -1906,6 +2117,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
   }
 
   addDeletedIds(Array.from(allowedIds));
+  syncDeleteMetadataFromFirestore(Array.from(allowedIds));
   records = records.filter((r) => !allowedIds.has(r.id));
   saveMetadata(records);
 
@@ -1949,6 +2161,7 @@ async function startServer() {
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    syncFromFirestore();
   });
   server.timeout = 0;
   server.keepAliveTimeout = 300000;

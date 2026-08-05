@@ -285,12 +285,82 @@ export default function App() {
         headers,
       });
 
+      let serverRecords: FileRecord[] = [];
       if (res.ok) {
-        let data = await res.json();
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          serverRecords = data;
+        }
+      }
 
-        // Client-side guard: filter out avatar files/folders for non-administrators
-        if (currentUser?.role !== 'administrator' && Array.isArray(data)) {
-          data = data.filter((r: FileRecord) => {
+      const filterAvatars = (records: FileRecord[]) => {
+        if (currentUser?.role === 'administrator') return records;
+        return records.filter((r: FileRecord) => {
+          const isAvatarFile =
+            r.tags?.includes('avatar') ||
+            r.tags?.includes('user-pfp') ||
+            r.id?.startsWith('avatar-') ||
+            r.originalName?.startsWith('Avatar_') ||
+            r.folderPath === 'avatar' ||
+            r.folderPath?.startsWith('avatar/');
+          const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
+          return !isAvatarFile && !isAvatarFolder;
+        });
+      };
+
+      serverRecords = filterAvatars(serverRecords);
+
+      // Persistent records from browser IndexedDB
+      const localRecords = await idbGetAllRecords();
+      const filteredLocal = filterAvatars(localRecords);
+
+      // Identify local records missing from server records
+      const serverIdSet = new Set(serverRecords.map((r) => r.id));
+      const missingFromServer = filteredLocal.filter((r) => !serverIdSet.has(r.id));
+
+      let finalFilesList: FileRecord[] = [...serverRecords];
+
+      if (missingFromServer.length > 0) {
+        const matchesCategory = (f: FileRecord) => {
+          if (activeCategory === 'all') return true;
+          if (f.isFolder || f.category === 'folder') return true;
+          return f.category === activeCategory;
+        };
+        const matchesSearch = (f: FileRecord) => {
+          if (!debouncedSearchTerm) return true;
+          const lower = debouncedSearchTerm.toLowerCase();
+          return (
+            f.originalName.toLowerCase().includes(lower) ||
+            (f.description && f.description.toLowerCase().includes(lower)) ||
+            (f.tags && f.tags.some((t) => t.toLowerCase().includes(lower)))
+          );
+        };
+
+        const matchingMissing = missingFromServer.filter(
+          (f) => matchesCategory(f) && matchesSearch(f)
+        );
+
+        finalFilesList = [...serverRecords, ...matchingMissing];
+
+        // Restore missing files back to server in background
+        rehydrateServerWithLocalRecords(missingFromServer);
+      }
+
+      setFiles(finalFilesList);
+      idbSaveRecords(finalFilesList);
+      try {
+        localStorage.setItem('vault_files_backup', JSON.stringify(finalFilesList));
+      } catch (e) {}
+
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
+      console.error('Error fetching files:', err);
+      const localRecords = await idbGetAllRecords();
+      const filteredLocal = currentUser?.role === 'administrator'
+        ? localRecords
+        : localRecords.filter((r) => {
             const isAvatarFile =
               r.tags?.includes('avatar') ||
               r.tags?.includes('user-pfp') ||
@@ -301,48 +371,8 @@ export default function App() {
             const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
             return !isAvatarFile && !isAvatarFolder;
           });
-        }
-
-        if (Array.isArray(data) && data.length > 0) {
-          setFiles(data);
-          idbSaveRecords(data);
-          try {
-            localStorage.setItem('vault_files_backup', JSON.stringify(data));
-          } catch (e) {}
-        } else {
-          // Server returned empty list. Restore from IndexedDB persistent storage
-          const localRecords = await idbGetAllRecords();
-          const filteredLocal = currentUser?.role === 'administrator'
-            ? localRecords
-            : localRecords.filter((r) => {
-                const isAvatarFile =
-                  r.tags?.includes('avatar') ||
-                  r.tags?.includes('user-pfp') ||
-                  r.id?.startsWith('avatar-') ||
-                  r.originalName?.startsWith('Avatar_') ||
-                  r.folderPath === 'avatar' ||
-                  r.folderPath?.startsWith('avatar/');
-                const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
-                return !isAvatarFile && !isAvatarFolder;
-              });
-
-          if (filteredLocal && filteredLocal.length > 0) {
-            setFiles(filteredLocal);
-            rehydrateServerWithLocalRecords(filteredLocal);
-          } else {
-            setFiles([]);
-            try {
-              localStorage.setItem('vault_files_backup', JSON.stringify([]));
-            } catch (e) {}
-          }
-        }
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return;
-      }
-      console.error('Error fetching files:', err);
-      showToast('Failed to load files from server', 'error');
+      setFiles(filteredLocal);
+      showToast('Loaded files from local offline cache', 'success');
     } finally {
       if (abortControllerRef.current === controller) {
         setIsLoading(false);
@@ -356,53 +386,152 @@ export default function App() {
     fetchStats();
   }, [fetchFiles, fetchStats]);
 
+  const triggerBrowserDownload = (blob: Blob, fileName: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
+  const rehydrateSingleFile = async (record: FileRecord) => {
+    try {
+      const blob = await idbGetBlob(record.id);
+      if (blob) {
+        const formData = new FormData();
+        formData.append('file', blob, record.originalName);
+        formData.append('id', record.id);
+        formData.append('originalName', record.originalName);
+        formData.append('filename', record.filename || '');
+        formData.append('folderPath', record.folderPath || '');
+        formData.append('relativePath', record.relativePath || record.originalName);
+        formData.append('category', record.category);
+        formData.append('mimeType', record.mimeType);
+        formData.append('uploadedBy', record.uploadedBy || 'public');
+        formData.append('uploadedByRole', record.uploadedByRole || 'normal');
+        formData.append('description', record.description || '');
+        formData.append('tags', JSON.stringify(record.tags || []));
+        formData.append('uploadDate', record.uploadDate);
+
+        await fetch('/api/files/rehydrate', {
+          method: 'POST',
+          body: formData,
+        });
+      }
+    } catch (err) {
+      console.error('Error rehydrating single file to server:', err);
+    }
+  };
+
+  const handleClientFolderZipDownload = async (folderRecord: FileRecord) => {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+
+    const folderFullPath = folderRecord.folderPath
+      ? `${folderRecord.folderPath}/${folderRecord.originalName}`
+      : folderRecord.originalName;
+
+    const allLocalRecords = await idbGetAllRecords();
+    const subFiles = allLocalRecords.filter(
+      (r) =>
+        !r.isFolder &&
+        ((r.folderPath || '') === folderFullPath ||
+          (r.folderPath || '').startsWith(folderFullPath + '/'))
+    );
+
+    let count = 0;
+    for (const sub of subFiles) {
+      let fileBlob: Blob | null = null;
+      try {
+        const res = await fetch(`/api/files/${sub.id}/download`);
+        if (res.ok) {
+          fileBlob = await res.blob();
+        }
+      } catch (e) {}
+
+      if (!fileBlob) {
+        fileBlob = await idbGetBlob(sub.id);
+      }
+
+      if (fileBlob) {
+        let relInFolder = sub.folderPath
+          ? sub.folderPath.slice(folderFullPath.length).replace(/^\//, '')
+          : '';
+        let zipEntryPath = relInFolder
+          ? `${folderRecord.originalName}/${relInFolder}/${sub.originalName}`
+          : `${folderRecord.originalName}/${sub.originalName}`;
+        zip.file(zipEntryPath, fileBlob);
+        count++;
+      }
+    }
+
+    if (count === 0) {
+      zip.file(`${folderRecord.originalName}/.keep`, 'Empty Folder Archive');
+    }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    triggerBrowserDownload(zipBlob, `${folderRecord.originalName}.zip`);
+    showToast(`Downloaded folder "${folderRecord.originalName}.zip"`, 'success');
+  };
+
   const handleDownloadFile = async (file: FileRecord) => {
     if (file.isFolder || file.category === 'folder') {
       showToast(`Compressing folder "${file.originalName}" into ZIP archive...`, 'success');
       try {
         const downloadUrl = `/api/files/${file.id}/download`;
         const res = await fetch(downloadUrl);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Failed to download folder');
+        if (res.ok) {
+          const blob = await res.blob();
+          triggerBrowserDownload(blob, `${file.originalName}.zip`);
+          showToast(`Downloaded folder "${file.originalName}.zip"`, 'success');
+          return;
         }
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${file.originalName}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+      } catch (e) {}
 
-        setTimeout(() => {
-          fetchFiles();
-          fetchStats();
-        }, 500);
-
-        showToast(`Downloaded folder "${file.originalName}.zip"`, 'success');
+      try {
+        await handleClientFolderZipDownload(file);
       } catch (err: any) {
         showToast(err.message || 'Error downloading folder archive', 'error');
       }
       return;
     }
 
+    showToast(`Downloading ${file.originalName}...`, 'success');
     const downloadUrl = `/api/files/${file.id}/download`;
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = file.originalName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const res = await fetch(downloadUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        triggerBrowserDownload(blob, file.originalName);
+        showToast(`Downloaded ${file.originalName}`, 'success');
+      } else {
+        // Physical file missing on server -> Fallback to IndexedDB local blob!
+        const localBlob = await idbGetBlob(file.id);
+        if (localBlob) {
+          triggerBrowserDownload(localBlob, file.originalName);
+          showToast(`Downloaded "${file.originalName}" from local cache. Restoring on server...`, 'success');
+          rehydrateSingleFile(file);
+        } else {
+          showToast(`Cannot download "${file.originalName}": file missing on server and local cache`, 'error');
+        }
+      }
+    } catch (err: any) {
+      const localBlob = await idbGetBlob(file.id);
+      if (localBlob) {
+        triggerBrowserDownload(localBlob, file.originalName);
+        showToast(`Downloaded "${file.originalName}" from local cache`, 'success');
+      } else {
+        showToast(err.message || 'Error downloading file', 'error');
+      }
+    }
 
-    // Refresh stats & file list to update download count
     setTimeout(() => {
       fetchFiles();
       fetchStats();
-    }, 500);
-
-    showToast(`Downloading ${file.originalName}`);
+    }, 1000);
   };
 
   const requestSingleDelete = (id: string) => {
@@ -491,30 +620,78 @@ export default function App() {
         }),
       });
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to generate ZIP archive');
+      if (res.ok) {
+        const blob = await res.blob();
+        const contentDisposition = res.headers.get('content-disposition');
+        let filename = 'FileVault_Bundle.zip';
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename="?([^"]+)"?/);
+          if (match && match[1]) filename = match[1];
+        }
+        triggerBrowserDownload(blob, filename);
+        showToast('ZIP archive downloaded successfully!', 'success');
+        return;
+      }
+    } catch (err: any) {
+      // Server bulk zip failed -> fallback to client JSZip
+    }
+
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+
+      const allLocalRecords = await idbGetAllRecords();
+      let filesToZip: FileRecord[] = [];
+
+      if (targetIds && targetIds.length > 0) {
+        const directRecords = allLocalRecords.filter((r) => targetIds.includes(r.id));
+        for (const rec of directRecords) {
+          if (rec.isFolder) {
+            const folderFullPath = rec.folderPath ? `${rec.folderPath}/${rec.originalName}` : rec.originalName;
+            const subFiles = allLocalRecords.filter(
+              (r) => !r.isFolder && ((r.folderPath || '') === folderFullPath || (r.folderPath || '').startsWith(folderFullPath + '/'))
+            );
+            filesToZip.push(...subFiles);
+          } else {
+            filesToZip.push(rec);
+          }
+        }
+      } else if (folderPathToZip !== undefined) {
+        filesToZip = allLocalRecords.filter(
+          (r) => !r.isFolder && ((r.folderPath || '') === folderPathToZip || (r.folderPath || '').startsWith(folderPathToZip ? folderPathToZip + '/' : ''))
+        );
       }
 
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const contentDisposition = res.headers.get('content-disposition');
-      let filename = 'FileVault_Bundle.zip';
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) filename = match[1];
-      }
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      filesToZip = filesToZip.filter((f, idx, self) => self.findIndex((x) => x.id === f.id) === idx);
 
+      let count = 0;
+      for (const f of filesToZip) {
+        let blob: Blob | null = null;
+        try {
+          const res = await fetch(`/api/files/${f.id}/download`);
+          if (res.ok) blob = await res.blob();
+        } catch (e) {}
+
+        if (!blob) blob = await idbGetBlob(f.id);
+
+        if (blob) {
+          let entryPath = f.originalName;
+          if (f.folderPath) entryPath = `${f.folderPath}/${f.originalName}`;
+          zip.file(entryPath, blob);
+          count++;
+        }
+      }
+
+      if (count === 0) {
+        showToast('No file content available to bundle into ZIP', 'error');
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      triggerBrowserDownload(zipBlob, `FileVault_Export_${Date.now()}.zip`);
       showToast('ZIP archive downloaded successfully!', 'success');
     } catch (err: any) {
-      showToast(err.message || 'Error downloading ZIP archive', 'error');
+      showToast('Failed to create ZIP archive', 'error');
     }
   };
 
