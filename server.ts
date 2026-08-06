@@ -2130,35 +2130,19 @@ function getRecursiveDeletionList(targetIds: string[], allRecords: FileRecord[])
 // 9. Delete File or Folder
 app.delete("/api/files/:id", (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
   let records = getMetadata();
   const record = records.find((r) => r.id === id);
 
-  if (!record) {
-    return res.status(404).json({ error: "File or folder not found" });
+  if (record && (record.id === "folder-avatar" || (record.isFolder && record.originalName.toLowerCase() === "avatar"))) {
+    return res.status(403).json({ error: "The system avatar folder cannot be deleted." });
   }
 
-  // Check if target item was created by administrator and requester is normal user
-  if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
-    return res.status(403).json({
-      error: "This item was created by an Administrator and cannot be deleted by normal users.",
-    });
-  }
+  const idsToDelete = record ? getRecursiveDeletionList([record.id], records).map((r) => r.id) : [id];
+  const deleteSet = new Set(idsToDelete);
 
-  // Resolve full recursive deletion list with strict parent/child relationship checks
-  const itemsToDelete = getRecursiveDeletionList([record.id], records);
-
-  // Filter out any sub-items uploaded by administrator if requester is normal user
-  const permittedItemsToDelete = itemsToDelete.filter((rec) => {
-    if (rec.uploadedByRole === "administrator" && requesterRole !== "administrator") {
-      return false;
-    }
-    return true;
-  });
-
-  for (const rec of permittedItemsToDelete) {
-    if (!rec.isFolder && rec.filename) {
-      const filePath = path.join(UPLOADS_DIR, rec.filename);
+  for (const itemRecord of records) {
+    if (deleteSet.has(itemRecord.id) && !itemRecord.isFolder && itemRecord.filename) {
+      const filePath = path.join(UPLOADS_DIR, itemRecord.filename);
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         try {
           fs.unlinkSync(filePath);
@@ -2169,54 +2153,44 @@ app.delete("/api/files/:id", (req, res) => {
     }
   }
 
-  const deleteSet = new Set(permittedItemsToDelete.map((r) => r.id));
   addDeletedIds(Array.from(deleteSet));
   syncDeleteMetadataFromFirestore(Array.from(deleteSet));
-  Array.from(deleteSet).forEach((id) => deleteFileChunksFromFirestore(id));
+  Array.from(deleteSet).forEach((delId) => deleteFileChunksFromFirestore(delId));
+
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
-  res.json({ message: record.isFolder ? "Folder and its contents deleted successfully" : "File deleted successfully" });
+  res.json({ message: record?.isFolder ? "Folder and its contents deleted successfully" : "Deleted successfully" });
 });
 
 // 10. Bulk Delete
 app.post("/api/files/bulk-delete", (req, res) => {
-  const { ids, userRole } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || userRole || "normal";
+  const { ids } = req.body;
 
   if (!Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ error: "No file IDs provided" });
+    return res.status(400).json({ error: "No item IDs provided" });
+  }
+
+  // Filter out system avatar folder
+  const filterSystemAvatar = (id: string) => id !== "folder-avatar";
+  const requestedIds = ids.filter(filterSystemAvatar);
+
+  if (requestedIds.length === 0) {
+    return res.status(400).json({ error: "System folder cannot be deleted" });
   }
 
   let records = getMetadata();
-  const targetRecords = records.filter((r) => ids.includes(r.id));
+  const targetRecords = records.filter((r) => requestedIds.includes(r.id));
   const targetIds = targetRecords.map((r) => r.id);
 
-  if (targetIds.length === 0) {
-    return res.status(404).json({ error: "No valid files found for deletion" });
-  }
+  // Get recursive deletion list for existing records
+  const recursiveItems = getRecursiveDeletionList(targetIds, records);
 
-  // Resolve full recursive deletion list with strict parent/child relationship checks
-  const itemsToDelete = getRecursiveDeletionList(targetIds, records);
+  // Combine directly requested IDs and resolved child items
+  const allIdsToDelete = new Set([...requestedIds, ...recursiveItems.map((r) => r.id)]);
 
-  // Filter out any items uploaded by administrator if requester is not administrator
-  const allowedToDelete = itemsToDelete.filter((record) => {
-    if (record.uploadedByRole === "administrator" && requesterRole !== "administrator") {
-      return false;
-    }
-    return true;
-  });
-
-  if (allowedToDelete.length === 0) {
-    return res.status(403).json({
-      error: "Selected file(s) were uploaded by Administrator and cannot be deleted by normal users.",
-    });
-  }
-
-  const allowedIds = new Set(allowedToDelete.map((r) => r.id));
-  let deletedCount = 0;
-
-  for (const record of allowedToDelete) {
+  // Remove physical files
+  for (const record of recursiveItems) {
     if (!record.isFolder && record.filename) {
       const filePath = path.join(UPLOADS_DIR, record.filename);
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -2227,22 +2201,17 @@ app.post("/api/files/bulk-delete", (req, res) => {
         }
       }
     }
-    deletedCount++;
   }
 
-  addDeletedIds(Array.from(allowedIds));
-  syncDeleteMetadataFromFirestore(Array.from(allowedIds));
-  Array.from(allowedIds).forEach((id) => deleteFileChunksFromFirestore(id));
-  records = records.filter((r) => !allowedIds.has(r.id));
+  const deleteArray = Array.from(allIdsToDelete);
+  addDeletedIds(deleteArray);
+  syncDeleteMetadataFromFirestore(deleteArray);
+  deleteArray.forEach((id) => deleteFileChunksFromFirestore(id));
+
+  records = records.filter((r) => !allIdsToDelete.has(r.id));
   saveMetadata(records);
 
-  const skippedCount = targetRecords.length - targetRecords.filter((r) => allowedIds.has(r.id)).length;
-  let msg = `${deletedCount} file(s) deleted successfully.`;
-  if (skippedCount > 0) {
-    msg += ` (${skippedCount} file(s) uploaded by Administrator were protected and skipped)`;
-  }
-
-  res.json({ message: msg });
+  res.json({ message: `${deleteArray.length} item(s) deleted successfully` });
 });
 
 // Global Express & Multer Error Handling Middleware

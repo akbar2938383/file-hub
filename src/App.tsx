@@ -536,30 +536,28 @@ export default function App() {
 
   const requestSingleDelete = (id: string) => {
     const targetFile = files.find((f) => f.id === id);
-    if (targetFile?.uploadedByRole === 'administrator' && currentUser?.role !== 'administrator') {
-      showToast('This file was uploaded by an Administrator and cannot be deleted by normal users.', 'error');
+    if (id === 'folder-avatar' || (targetFile?.isFolder && targetFile.originalName.toLowerCase() === 'avatar')) {
+      showToast('The system avatar folder cannot be deleted.', 'error');
       return;
     }
-    setDeleteTarget({ id, name: targetFile ? targetFile.originalName : 'this file' });
+    setDeleteTarget({ id, name: targetFile ? targetFile.originalName : 'this item' });
   };
 
   const requestBulkDelete = () => {
     if (selectedIds.length === 0) return;
-    if (currentUser?.role !== 'administrator') {
-      const selectedFiles = files.filter((f) => selectedIds.includes(f.id));
-      const adminCount = selectedFiles.filter((f) => f.uploadedByRole === 'administrator').length;
-      if (adminCount === selectedFiles.length) {
-        showToast('Selected file(s) were uploaded by Administrator and cannot be deleted by normal users.', 'error');
-        return;
-      }
+    const filterSystemFolder = selectedIds.filter((id) => id !== 'folder-avatar');
+    if (filterSystemFolder.length === 0) {
+      showToast('System avatar folder cannot be deleted.', 'error');
+      return;
     }
-    setDeleteTarget({ bulk: true, name: `${selectedIds.length} selected file(s)` });
+    setDeleteTarget({ bulk: true, name: `${filterSystemFolder.length} selected item(s)` });
   };
 
   const confirmExecutionDelete = async () => {
     if (!deleteTarget) return;
 
     if (deleteTarget.bulk) {
+      const idsToDelete = selectedIds.filter((id) => id !== 'folder-avatar');
       try {
         const res = await fetch('/api/files/bulk-delete', {
           method: 'POST',
@@ -567,23 +565,27 @@ export default function App() {
             'Content-Type': 'application/json',
             'x-user-role': currentUser?.role || 'normal',
           },
-          body: JSON.stringify({ ids: selectedIds, userRole: currentUser?.role || 'normal' }),
+          body: JSON.stringify({ ids: idsToDelete, userRole: currentUser?.role || 'normal' }),
         });
 
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Bulk delete failed');
+        if (!res.ok && res.status !== 404) throw new Error(data.error || 'Bulk delete failed');
 
-        await idbDeleteRecords(selectedIds);
-        showToast(data.message || `${selectedIds.length} file(s) deleted successfully`);
+        await idbDeleteRecords(idsToDelete);
+        setFiles((prev) => prev.filter((f) => !idsToDelete.includes(f.id)));
+        showToast(data.message || `${idsToDelete.length} item(s) deleted successfully`, 'success');
         setSelectedIds([]);
         fetchFiles();
         fetchStats();
       } catch (err: any) {
         showToast(err.message || 'Failed to perform bulk delete', 'error');
+      } finally {
+        setDeleteTarget(null);
       }
     } else if (deleteTarget.id) {
+      const targetId = deleteTarget.id;
       try {
-        const res = await fetch(`/api/files/${deleteTarget.id}`, {
+        const res = await fetch(`/api/files/${targetId}`, {
           method: 'DELETE',
           headers: {
             'x-user-role': currentUser?.role || 'normal',
@@ -591,15 +593,18 @@ export default function App() {
         });
 
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Delete failed');
+        if (!res.ok && res.status !== 404) throw new Error(data.error || 'Delete failed');
 
-        await idbDeleteRecord(deleteTarget.id);
-        showToast(data.message || 'File deleted successfully');
-        setSelectedIds((prev) => prev.filter((i) => i !== deleteTarget.id));
+        await idbDeleteRecord(targetId);
+        setFiles((prev) => prev.filter((f) => f.id !== targetId));
+        showToast(data.message || 'Folder or file deleted successfully', 'success');
+        setSelectedIds((prev) => prev.filter((i) => i !== targetId));
         fetchFiles();
         fetchStats();
       } catch (err: any) {
-        showToast(err.message || 'Failed to delete file', 'error');
+        showToast(err.message || 'Failed to delete file or folder', 'error');
+      } finally {
+        setDeleteTarget(null);
       }
     }
   };

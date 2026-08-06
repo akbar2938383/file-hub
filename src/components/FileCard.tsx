@@ -33,9 +33,10 @@ export const FileCard: React.FC<Props> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
+  const isSystemFolder = file.id === 'folder-avatar' || (file.isFolder && file.originalName?.toLowerCase() === 'avatar');
   const isAdminUploaded = file.uploadedByRole === 'administrator';
   const isUserAdmin = currentUser?.role === 'administrator';
-  const isProtected = isAdminUploaded && !isUserAdmin;
+  const isProtected = isSystemFolder;
 
   const isFolder = file.isFolder === true || file.category === 'folder';
   const folderTargetPath = file.folderPath ? `${file.folderPath}/${file.originalName}` : file.originalName;
