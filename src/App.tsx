@@ -515,7 +515,7 @@ export default function App() {
           showToast(`Downloaded "${file.originalName}" from local cache. Restoring on server...`, 'success');
           rehydrateSingleFile(file);
         } else {
-          showToast(`Cannot download "${file.originalName}": file missing on server and local cache`, 'error');
+          showToast(`Cannot download "${file.originalName}": file was uploaded before cloud persistence was enabled. Please re-upload it.`, 'error');
         }
       }
     } catch (err: any) {

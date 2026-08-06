@@ -13,7 +13,9 @@ import {
   getDocs,
   getDoc,
   collection,
-  deleteDoc
+  deleteDoc,
+  query,
+  where
 } from "firebase/firestore";
 
 interface FileRecord {
@@ -167,6 +169,96 @@ function syncSaveSettingsToFirestore(settings: SettingsRecord) {
   });
 }
 
+const CHUNK_SIZE = 500 * 1024; // 500 KB per chunk
+
+async function saveFileChunksToFirestore(fileId: string, filePath: string) {
+  const db = getDb();
+  if (!db || !fileId || !filePath) return;
+  Promise.resolve().then(async () => {
+    try {
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return;
+      const fileBuffer = fs.readFileSync(filePath);
+      const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileBuffer.length);
+        const chunkBuffer = fileBuffer.subarray(start, end);
+        const base64Data = chunkBuffer.toString("base64");
+
+        const chunkDocId = `${fileId}_chunk_${i}`;
+        await setDoc(doc(db, "file_chunks", chunkDocId), {
+          fileId,
+          chunkIndex: i,
+          totalChunks,
+          data: base64Data,
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+      }
+      console.log(`Saved ${totalChunks} binary chunk(s) to Firestore for fileId: ${fileId}`);
+    } catch (err) {
+      console.error(`Error saving binary chunks to Firestore for file ${fileId}:`, err);
+    }
+  });
+}
+
+async function ensureFileOnDiskFromFirestore(fileId: string, filePath: string): Promise<boolean> {
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    return true;
+  }
+  const db = getDb();
+  if (!db || !fileId) return false;
+
+  try {
+    console.log(`File missing on disk (${filePath}). Attempting to restore from Firestore binary chunks...`);
+    const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      console.warn(`No binary chunks found in Firestore for fileId: ${fileId}`);
+      return false;
+    }
+
+    const chunks: { chunkIndex: number; data: string }[] = [];
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      chunks.push({ chunkIndex: d.chunkIndex, data: d.data });
+    });
+
+    chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+    const buffers = chunks.map((c) => Buffer.from(c.data, "base64"));
+    const combinedBuffer = Buffer.concat(buffers);
+
+    const parentDir = path.dirname(filePath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    fs.writeFileSync(filePath, combinedBuffer);
+    console.log(`Successfully restored file from Firestore binary chunks to disk: ${filePath} (${combinedBuffer.length} bytes)`);
+    return true;
+  } catch (err) {
+    console.error(`Error restoring file from Firestore binary chunks for file ${fileId}:`, err);
+    return false;
+  }
+}
+
+async function deleteFileChunksFromFirestore(fileId: string) {
+  const db = getDb();
+  if (!db || !fileId) return;
+  Promise.resolve().then(async () => {
+    try {
+      const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
+      const snap = await getDocs(q);
+      snap.forEach((docSnap) => {
+        deleteDoc(docSnap.ref).catch(() => {});
+      });
+    } catch (err) {
+      console.error(`Error deleting binary chunks from Firestore for file ${fileId}:`, err);
+    }
+  });
+}
+
 async function syncFromFirestore() {
   const db = getDb();
   if (!db) return;
@@ -204,6 +296,13 @@ async function syncFromFirestore() {
       if (updated) {
         fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
         console.log(`Synced ${localRecords.length} file records from Firestore.`);
+      }
+
+      // Pre-warm restoration of binary files onto disk
+      for (const rr of localRecords) {
+        if (!rr.isFolder && rr.filename) {
+          ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
+        }
       }
     } else {
       // Seed initial local records to Firestore
@@ -907,6 +1006,7 @@ app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
 
   const existingRecords = getMetadata();
   saveMetadata([record, ...existingRecords]);
+  saveFileChunksToFirestore(recordId, path.join(UPLOADS_DIR, file.filename));
 
   saveUsers(users);
   const { password: _, ...safeUser } = users[index];
@@ -1029,6 +1129,7 @@ app.post("/api/wallpaper/upload", upload.single("wallpaper"), (req, res) => {
   // Save to metadata as well so it appears in file manager
   const files = getMetadata();
   saveMetadata([fileRecord, ...files]);
+  saveFileChunksToFirestore(fileRecord.id, path.join(UPLOADS_DIR, file.filename));
 
   const wallpaperUrl = `/api/files/${fileRecord.id}/view`;
   const settings = getSettings();
@@ -1217,6 +1318,10 @@ app.post("/api/files/rehydrate", upload.single("file"), (req, res) => {
   const updatedRecords = [...createdFolders, ...existingRecords];
   const finalRecords = updatedRecords.filter((r, idx, self) => self.findIndex((x) => x.id === r.id) === idx);
   saveMetadata(finalRecords);
+
+  if (targetFilename) {
+    saveFileChunksToFirestore(id, path.join(UPLOADS_DIR, targetFilename));
+  }
 
   res.status(200).json({ message: "File rehydrated successfully", file: record });
 });
@@ -1514,6 +1619,7 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
       relativePath: relPath,
     };
     newRecords.push(record);
+    saveFileChunksToFirestore(record.id, path.join(UPLOADS_DIR, file.filename));
   }
 
   const updatedRecords = [...newRecords, ...newlyCreatedFolders, ...existingRecords];
@@ -1648,6 +1754,7 @@ app.post("/api/files/upload-complete", (req, res) => {
 
     const updatedRecords = [record, ...createdFolders, ...existingRecords];
     saveMetadata(updatedRecords);
+    saveFileChunksToFirestore(record.id, finalFilePath);
 
     res.status(201).json({
       message: "File upload completed successfully",
@@ -1696,6 +1803,7 @@ app.post("/api/files/create-text", (req, res) => {
 
   const existingRecords = getMetadata();
   saveMetadata([record, ...existingRecords]);
+  saveFileChunksToFirestore(record.id, filePath);
 
   res.status(201).json({ message: "File created successfully", file: record });
 });
@@ -1740,7 +1848,8 @@ app.post("/api/files/bulk-download-zip", async (req, res) => {
 
     for (const record of filesToZip) {
       const filePath = path.join(UPLOADS_DIR, record.filename);
-      if (fs.existsSync(filePath)) {
+      const fileExists = await ensureFileOnDiskFromFirestore(record.id, filePath);
+      if (fileExists && fs.existsSync(filePath)) {
         const fileBuffer = fs.readFileSync(filePath);
         let entryPath = record.originalName;
         if (record.folderPath) {
@@ -1789,7 +1898,8 @@ app.get("/api/files/:id/download", async (req, res) => {
       for (const subRecord of subFiles) {
         if (subRecord.filename) {
           const filePath = path.join(UPLOADS_DIR, subRecord.filename);
-          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          const fileExists = await ensureFileOnDiskFromFirestore(subRecord.id, filePath);
+          if (fileExists && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
             const fileBuffer = fs.readFileSync(filePath);
             let relInFolder = subRecord.folderPath ? subRecord.folderPath.slice(folderFullPath.length).replace(/^\//, "") : "";
             let zipEntryPath = relInFolder
@@ -1822,9 +1932,10 @@ app.get("/api/files/:id/download", async (req, res) => {
   }
 
   const filePath = path.join(UPLOADS_DIR, record.filename);
+  const fileExists = await ensureFileOnDiskFromFirestore(record.id, filePath);
 
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    return res.status(404).json({ error: "Physical file missing on server" });
+  if (!fileExists || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return res.status(404).json({ error: "Physical file missing on server and cloud storage" });
   }
 
   // Increment download count
@@ -1839,7 +1950,7 @@ app.get("/api/files/:id/download", async (req, res) => {
 });
 
 // 6. Preview / View File Content Inline
-app.get("/api/files/:id/view", (req, res) => {
+app.get("/api/files/:id/view", async (req, res) => {
   const { id } = req.params;
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
@@ -1853,8 +1964,9 @@ app.get("/api/files/:id/view", (req, res) => {
   }
 
   const filePath = path.join(UPLOADS_DIR, record.filename);
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    return res.status(404).send("File missing on server");
+  const fileExists = await ensureFileOnDiskFromFirestore(record.id, filePath);
+  if (!fileExists || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return res.status(404).send("File missing on server and cloud storage");
   }
 
   // Set header to render inline
@@ -1864,7 +1976,7 @@ app.get("/api/files/:id/view", (req, res) => {
 });
 
 // 7. Get File Content as JSON (for text/code previewing directly)
-app.get("/api/files/:id/content", (req, res) => {
+app.get("/api/files/:id/content", async (req, res) => {
   const { id } = req.params;
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
@@ -1878,8 +1990,9 @@ app.get("/api/files/:id/content", (req, res) => {
   }
 
   const filePath = path.join(UPLOADS_DIR, record.filename);
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    return res.status(404).json({ error: "File missing on server" });
+  const fileExists = await ensureFileOnDiskFromFirestore(record.id, filePath);
+  if (!fileExists || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return res.status(404).json({ error: "File missing on server and cloud storage" });
   }
 
   // Only allow reading if size is reasonably small (< 5MB)
@@ -2059,6 +2172,7 @@ app.delete("/api/files/:id", (req, res) => {
   const deleteSet = new Set(permittedItemsToDelete.map((r) => r.id));
   addDeletedIds(Array.from(deleteSet));
   syncDeleteMetadataFromFirestore(Array.from(deleteSet));
+  Array.from(deleteSet).forEach((id) => deleteFileChunksFromFirestore(id));
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
@@ -2118,6 +2232,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
 
   addDeletedIds(Array.from(allowedIds));
   syncDeleteMetadataFromFirestore(Array.from(allowedIds));
+  Array.from(allowedIds).forEach((id) => deleteFileChunksFromFirestore(id));
   records = records.filter((r) => !allowedIds.has(r.id));
   saveMetadata(records);
 
