@@ -8,6 +8,8 @@ import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps } from "firebase/app";
 import {
   getFirestore,
+  terminate,
+  disableNetwork,
   doc,
   setDoc,
   getDocs,
@@ -82,8 +84,10 @@ function addDeletedIds(ids: string[]) {
 
 // --- FIREBASE FIRESTORE PERSISTENT STORAGE ---
 let firestoreDb: ReturnType<typeof getFirestore> | null = null;
+let isFirestoreQuotaExceeded = false;
 
 function getDb() {
+  if (isFirestoreQuotaExceeded) return null;
   if (firestoreDb) return firestoreDb;
   try {
     const configPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -111,67 +115,100 @@ function getDb() {
   return firestoreDb;
 }
 
+function handleFirestoreQuotaError(err: any, contextName: string) {
+  if (err?.code === "resource-exhausted" || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("Quota limit exceeded")) {
+    if (!isFirestoreQuotaExceeded) {
+      isFirestoreQuotaExceeded = true;
+      console.warn(`Firestore free daily write quota limit reached (${contextName}). Disabling Firestore background writes for this session. App will continue using local disk & metadata.`);
+      if (firestoreDb) {
+        const dbToClose = firestoreDb;
+        firestoreDb = null;
+        disableNetwork(dbToClose).catch(() => {});
+        terminate(dbToClose).catch(() => {});
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 function syncSaveMetadataToFirestore(records: FileRecord[]) {
+  if (isFirestoreQuotaExceeded) return;
   const db = getDb();
   if (!db) return;
   Promise.resolve().then(async () => {
     try {
       for (const r of records) {
+        if (isFirestoreQuotaExceeded) break;
         // Clean undefined values for Firestore compatibility
         const cleanDoc = JSON.parse(JSON.stringify(r));
         await setDoc(doc(db, "files", r.id), cleanDoc, { merge: true });
       }
-    } catch (err) {
-      console.error("Error syncing metadata to Firestore:", err);
+    } catch (err: any) {
+      if (!handleFirestoreQuotaError(err, "metadata write")) {
+        console.warn("Error syncing metadata to Firestore:", err?.message || err);
+      }
     }
-  });
+  }).catch(() => {});
 }
 
 function syncDeleteMetadataFromFirestore(ids: string[]) {
+  if (isFirestoreQuotaExceeded) return;
   const db = getDb();
   if (!db) return;
   Promise.resolve().then(async () => {
     try {
       for (const id of ids) {
+        if (isFirestoreQuotaExceeded) break;
         await deleteDoc(doc(db, "files", id));
       }
-    } catch (err) {
-      console.error("Error deleting metadata from Firestore:", err);
+    } catch (err: any) {
+      if (!handleFirestoreQuotaError(err, "metadata delete")) {
+        console.warn("Error deleting metadata from Firestore:", err?.message || err);
+      }
     }
-  });
+  }).catch(() => {});
 }
 
 function syncSaveUsersToFirestore(users: UserRecord[]) {
+  if (isFirestoreQuotaExceeded) return;
   const db = getDb();
   if (!db) return;
   Promise.resolve().then(async () => {
     try {
       for (const u of users) {
+        if (isFirestoreQuotaExceeded) break;
         const cleanUser = JSON.parse(JSON.stringify(u));
         await setDoc(doc(db, "users", u.id), cleanUser, { merge: true });
       }
-    } catch (err) {
-      console.error("Error syncing users to Firestore:", err);
+    } catch (err: any) {
+      if (!handleFirestoreQuotaError(err, "users write")) {
+        console.warn("Error syncing users to Firestore:", err?.message || err);
+      }
     }
-  });
+  }).catch(() => {});
 }
 
 function syncSaveSettingsToFirestore(settings: SettingsRecord) {
+  if (isFirestoreQuotaExceeded) return;
   const db = getDb();
   if (!db) return;
   Promise.resolve().then(async () => {
     try {
       const cleanSettings = JSON.parse(JSON.stringify(settings));
       await setDoc(doc(db, "settings", "active"), cleanSettings, { merge: true });
-    } catch (err) {
-      console.error("Error syncing settings to Firestore:", err);
+    } catch (err: any) {
+      if (!handleFirestoreQuotaError(err, "settings write")) {
+        console.warn("Error syncing settings to Firestore:", err?.message || err);
+      }
     }
-  });
+  }).catch(() => {});
 }
 
 const CHUNK_SIZE = 500 * 1024; // 500 KB per chunk
 
 async function saveFileChunksToFirestore(fileId: string, filePath: string) {
+  if (isFirestoreQuotaExceeded) return;
   const db = getDb();
   if (!db || !fileId || !filePath) return;
   Promise.resolve().then(async () => {
@@ -181,25 +218,35 @@ async function saveFileChunksToFirestore(fileId: string, filePath: string) {
       const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
 
       for (let i = 0; i < totalChunks; i++) {
+        if (isFirestoreQuotaExceeded) break;
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, fileBuffer.length);
         const chunkBuffer = fileBuffer.subarray(start, end);
         const base64Data = chunkBuffer.toString("base64");
 
         const chunkDocId = `${fileId}_chunk_${i}`;
-        await setDoc(doc(db, "file_chunks", chunkDocId), {
-          fileId,
-          chunkIndex: i,
-          totalChunks,
-          data: base64Data,
-          createdAt: new Date().toISOString()
-        }, { merge: true });
+        try {
+          await setDoc(doc(db, "file_chunks", chunkDocId), {
+            fileId,
+            chunkIndex: i,
+            totalChunks,
+            data: base64Data,
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (writeErr: any) {
+          if (handleFirestoreQuotaError(writeErr, "binary chunk write")) {
+            break;
+          } else {
+            console.warn(`Firestore binary chunk write error:`, writeErr?.message || writeErr);
+          }
+        }
       }
-      console.log(`Saved ${totalChunks} binary chunk(s) to Firestore for fileId: ${fileId}`);
-    } catch (err) {
-      console.error(`Error saving binary chunks to Firestore for file ${fileId}:`, err);
+    } catch (err: any) {
+      if (!handleFirestoreQuotaError(err, "binary chunk save")) {
+        console.warn(`Error saving binary chunks to Firestore for file ${fileId}:`, err?.message || err);
+      }
     }
-  });
+  }).catch(() => {});
 }
 
 async function ensureFileOnDiskFromFirestore(fileId: string, filePath: string): Promise<boolean> {
@@ -370,7 +417,9 @@ async function syncFromFirestore() {
     }
     console.log("Firestore cloud state sync complete.");
   } catch (err) {
-    console.error("Error during Firestore sync:", err);
+    if (!handleFirestoreQuotaError(err, "initial sync")) {
+      console.error("Error during Firestore sync:", err);
+    }
   }
 }
 

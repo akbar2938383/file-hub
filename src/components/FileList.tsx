@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileRecord, ViewMode, SortOption, StorageStats, User } from '../types';
 import { FileCard } from './FileCard';
-import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2 } from 'lucide-react';
+import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2, Upload } from 'lucide-react';
 
 interface Props {
   files: FileRecord[];
@@ -94,7 +94,7 @@ export const FileList: React.FC<Props> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create folder');
 
       showToast?.(data.message || 'Folder created successfully!', 'success');
@@ -192,6 +192,16 @@ export const FileList: React.FC<Props> = ({
                 </select>
               </div>
             )}
+
+            {/* Upload Button */}
+            <button
+              id="upload-file-btn"
+              onClick={onOpenUpload}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5 shrink-0"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload</span>
+            </button>
 
             {/* New Folder Button */}
             <button

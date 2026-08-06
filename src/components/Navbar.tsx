@@ -1,6 +1,6 @@
 import React from 'react';
 import { User, ActivePage } from '../types';
-import { HardDrive, Upload, FileCode, RefreshCw, Terminal, Image, Users, LogIn, LogOut, ShieldCheck, UserCheck, Folder, Sun, Moon } from 'lucide-react';
+import { HardDrive, FileCode, RefreshCw, Terminal, Image, Users, LogIn, LogOut, ShieldCheck, UserCheck, Folder, Sun, Moon } from 'lucide-react';
 
 interface Props {
   activePage: ActivePage;
@@ -194,15 +194,6 @@ export const Navbar: React.FC<Props> = ({
               >
                 <FileCode className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-cyan-500 shrink-0" />
                 <span>Text<span className="hidden sm:inline">/Code</span></span>
-              </button>
-
-              <button
-                id="upload-files-main-btn"
-                onClick={onOpenUpload}
-                className="px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg sm:rounded-xl shadow-sm transition-colors flex items-center gap-1 sm:gap-1.5 whitespace-nowrap shrink-0"
-              >
-                <Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                <span>Upload</span>
               </button>
             </>
           )}

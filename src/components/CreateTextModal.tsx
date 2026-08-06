@@ -51,11 +51,11 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
       });
 
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to create file');
       }
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
       if (resData.file) {
         await idbSaveRecord(resData.file);
         const textBlob = new Blob([content], { type: 'text/plain' });

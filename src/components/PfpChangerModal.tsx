@@ -69,7 +69,7 @@ export const PfpChangerModal: React.FC<Props> = ({
           body: formData,
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Failed to update avatar');
 
         showToast('Profile picture updated successfully!', 'success');
@@ -83,7 +83,7 @@ export const PfpChangerModal: React.FC<Props> = ({
           body: JSON.stringify({ avatar: selectedPreset }),
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Failed to update avatar');
 
         showToast('Profile picture updated successfully!', 'success');
@@ -97,7 +97,7 @@ export const PfpChangerModal: React.FC<Props> = ({
           body: JSON.stringify({ avatar: customUrl.trim() }),
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Failed to update avatar');
 
         showToast('Profile picture updated successfully!', 'success');

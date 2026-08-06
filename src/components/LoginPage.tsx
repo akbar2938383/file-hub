@@ -45,7 +45,7 @@ export const LoginPage: React.FC<Props> = ({
         body: JSON.stringify({ username, password, syncUsers }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'Login failed');
       }

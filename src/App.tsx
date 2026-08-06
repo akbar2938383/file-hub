@@ -108,16 +108,21 @@ export default function App() {
     try {
       const res = await fetch('/api/wallpaper');
       if (res.ok) {
-        const data = await res.json();
-        setWallpaperSettings(data);
-        if (data && data.activeWallpaper) {
-          try {
-            localStorage.setItem('vault_wallpaper_backup', JSON.stringify(data));
-          } catch (e) {}
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (data) {
+            setWallpaperSettings(data);
+            if (data.activeWallpaper) {
+              try {
+                localStorage.setItem('vault_wallpaper_backup', JSON.stringify(data));
+              } catch (e) {}
+            }
+          }
         }
       }
     } catch (err) {
-      console.error('Error fetching wallpaper settings:', err);
+      // Ignore transient parse or fetch errors during background polling
     }
   }, []);
 
@@ -207,8 +212,11 @@ export default function App() {
       }
       const res = await fetch('/api/files/stats', { headers });
       if (res.ok) {
-        const data = await res.json();
-        setStats(data);
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (data) setStats(data);
+        }
       }
     } catch (err) {
       console.error('Error fetching stats:', err);
@@ -287,9 +295,12 @@ export default function App() {
 
       let serverRecords: FileRecord[] = [];
       if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          serverRecords = data;
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data)) {
+            serverRecords = data;
+          }
         }
       }
 

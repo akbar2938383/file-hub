@@ -54,7 +54,7 @@ export const WallpaperChangerPage: React.FC<Props> = ({
   const handleDeletePreset = async (preset: WallpaperConfig) => {
     try {
       const res = await fetch(`/api/wallpaper/preset/${preset.id}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to remove wallpaper preset');
       showToast(`Wallpaper preset "${preset.name}" removed`, 'success');
       onRefreshWallpaper();
@@ -131,9 +131,9 @@ export const WallpaperChangerPage: React.FC<Props> = ({
         body: formData,
       });
 
-      if (!res.ok) throw new Error('Failed to upload wallpaper image');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to upload wallpaper image');
 
-      const data = await res.json();
       showToast('Custom wallpaper uploaded and activated globally!', 'success');
       onRefreshWallpaper();
 

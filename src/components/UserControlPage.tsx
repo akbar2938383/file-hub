@@ -57,8 +57,11 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
 
       const res = await fetch('/api/users');
       if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (data) setUsers(data);
+        }
       }
     } catch (err) {
       showToast('Failed to load user list', 'error');
@@ -88,7 +91,7 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to create user');
 
       // Save to localStorage persistent backup
@@ -130,7 +133,7 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to update user');
 
       // Update in localStorage
@@ -180,7 +183,7 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
         method: 'DELETE',
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to delete user');
 
       // Remove from localStorage
