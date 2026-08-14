@@ -189,20 +189,20 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3 truncate mr-4">
-            <div className="p-2.5 bg-blue-500/10 text-blue-600 rounded-xl shrink-0">
-              <Eye className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-100 dark:border-slate-800 gap-2 w-full min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 mr-1 sm:mr-3">
+            <div className="p-2 sm:p-2.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl shrink-0">
+              <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div className="truncate">
-              <h3 className="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">
+            <div className="min-w-0 flex-1 truncate">
+              <h3 className="font-semibold text-sm sm:text-base text-slate-900 dark:text-slate-100 truncate">
                 {file.originalName}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 sm:gap-2 truncate">
                 <span>{formatBytes(file.size)}</span>
                 <span>•</span>
                 <span className="uppercase">{file.category}</span>
@@ -210,16 +210,16 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {onQrCode && (
               <button
                 id="qr-preview-file"
                 onClick={() => onQrCode(file)}
                 title="Mobile QR Code"
-                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
+                className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
               >
-                <QrCode className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span className="hidden sm:inline">QR Code</span>
+                <QrCode className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span className="hidden md:inline">QR Code</span>
               </button>
             )}
 
@@ -227,19 +227,20 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
               id="copy-download-link"
               onClick={copyDownloadLink}
               title="Copy download URL"
-              className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
+              className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
             >
-              {copiedLink ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
-              <span>{copiedLink ? 'Copied Link' : 'Share'}</span>
+              {copiedLink ? <Check className="w-4 h-4 text-emerald-500 shrink-0" /> : <Share2 className="w-4 h-4 shrink-0" />}
+              <span className="hidden sm:inline">{copiedLink ? 'Copied' : 'Share'}</span>
             </button>
 
             <button
               id="download-preview-file"
               onClick={() => onDownload(file)}
-              className="p-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors"
+              title="Download file"
+              className="p-1.5 sm:p-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg sm:rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors"
             >
-              <Download className="w-4 h-4" />
-              <span>Download</span>
+              <Download className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Download</span>
             </button>
 
             {onDelete && (
@@ -250,28 +251,29 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
                   onDelete(file.id);
                 }}
                 title="Delete file"
-                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors"
+                className="p-1.5 sm:p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg sm:rounded-xl transition-colors"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-4 h-4 shrink-0" />
               </button>
             )}
 
             <button
               id="close-preview-modal"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ml-1"
+              title="Close modal"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg sm:rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
             </button>
           </div>
         </div>
 
         {/* Content Preview Container */}
-        <div className="p-6 overflow-y-auto space-y-5 flex-1">
+        <div className="p-3.5 sm:p-6 overflow-y-auto space-y-3.5 sm:space-y-5 flex-1">
           {renderMediaPreview()}
 
           {/* Detailed Info Card */}
-          <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+          <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 sm:p-4 grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 text-xs">
             <div>
               <div className="text-slate-400 flex items-center gap-1 mb-1">
                 <Calendar className="w-3.5 h-3.5" /> Upload Date
@@ -302,7 +304,7 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
           </div>
 
           {file.description && (
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/30 border border-slate-200/60 dark:border-slate-800 rounded-xl text-xs">
+            <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-800/30 border border-slate-200/60 dark:border-slate-800 rounded-xl text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">Notes:</span>
               <p className="text-slate-600 dark:text-slate-400">{file.description}</p>
             </div>
