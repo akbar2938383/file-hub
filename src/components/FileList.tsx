@@ -124,7 +124,7 @@ export const FileList: React.FC<Props> = ({
     if (allSelected) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(files.map((f) => f.id));
+      setSelectedIds(displayedFiles.map((f) => f.id));
     }
   };
 

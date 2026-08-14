@@ -82,6 +82,14 @@ function addDeletedIds(ids: string[]) {
   }
 }
 
+function saveDeletedIds(ids: string[]) {
+  try {
+    fs.writeFileSync(DELETED_IDS_FILE, JSON.stringify(ids, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving deleted ids:", err);
+  }
+}
+
 // --- FIREBASE FIRESTORE PERSISTENT STORAGE ---
 let firestoreDb: ReturnType<typeof getFirestore> | null = null;
 let isFirestoreQuotaExceeded = false;
@@ -315,40 +323,60 @@ async function syncFromFirestore() {
 
     // 1. Files Sync
     const filesSnap = await getDocs(collection(db, "files"));
+    const deletedIds = getDeletedIds();
+    const isStorageClearedLocally = fs.existsSync(path.join(UPLOADS_DIR, "storage_cleared.flag"));
+
     if (!filesSnap.empty) {
-      const remoteRecords: FileRecord[] = [];
-      filesSnap.forEach((docSnap) => {
-        remoteRecords.push(docSnap.data() as FileRecord);
-      });
+      if (isStorageClearedLocally) {
+        // If storage was wiped clean by admin, purge remote ghost documents from Firestore
+        filesSnap.forEach((docSnap) => {
+          deleteDoc(docSnap.ref).catch(() => {});
+        });
+      } else {
+        const remoteRecords: FileRecord[] = [];
+        filesSnap.forEach((docSnap) => {
+          const fileData = docSnap.data() as FileRecord;
+          if (deletedIds.has(fileData.id)) {
+            // If already deleted locally, purge from Firestore
+            deleteDoc(doc(db, "files", fileData.id)).catch(() => {});
+          } else {
+            remoteRecords.push(fileData);
+          }
+        });
 
-      let localRecords: FileRecord[] = [];
-      try {
-        if (fs.existsSync(METADATA_FILE)) {
-          localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
+        let localRecords: FileRecord[] = [];
+        try {
+          if (fs.existsSync(METADATA_FILE)) {
+            localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
+          }
+        } catch (e) {}
+
+        // Strip any deleted IDs from localRecords
+        localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
+
+        let updated = false;
+        for (const rr of remoteRecords) {
+          if (deletedIds.has(rr.id)) continue;
+          const idx = localRecords.findIndex((r) => r.id === rr.id);
+          if (idx === -1) {
+            localRecords.push(rr);
+            updated = true;
+          } else {
+            localRecords[idx] = { ...localRecords[idx], ...rr };
+            updated = true;
+          }
         }
-      } catch (e) {}
 
-      let updated = false;
-      for (const rr of remoteRecords) {
-        const idx = localRecords.findIndex((r) => r.id === rr.id);
-        if (idx === -1) {
-          localRecords.push(rr);
-          updated = true;
-        } else {
-          localRecords[idx] = { ...localRecords[idx], ...rr };
-          updated = true;
+        if (updated) {
+          fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
+          console.log(`Synced ${localRecords.length} file records from Firestore.`);
         }
-      }
 
-      if (updated) {
-        fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
-        console.log(`Synced ${localRecords.length} file records from Firestore.`);
-      }
-
-      // Pre-warm restoration of binary files onto disk
-      for (const rr of localRecords) {
-        if (!rr.isFolder && rr.filename) {
-          ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
+        // Pre-warm restoration of binary files onto disk
+        for (const rr of localRecords) {
+          if (!rr.isFolder && rr.filename) {
+            ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
+          }
         }
       }
     } else {
@@ -357,6 +385,7 @@ async function syncFromFirestore() {
       try {
         if (fs.existsSync(METADATA_FILE)) {
           localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
+          localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
           syncSaveMetadataToFirestore(localRecords);
         }
       } catch (e) {}
@@ -762,35 +791,22 @@ function getMetadata(): FileRecord[] {
       }
     });
 
-    // Ensure system avatar folder exists in root
-    const hasAvatarFolder = records.some(
-      (r) => r.isFolder && r.originalName.toLowerCase() === "avatar" && (r.folderPath || "") === ""
-    );
-    if (!hasAvatarFolder) {
-      records.unshift({
-        id: "folder-avatar",
-        originalName: "avatar",
-        filename: "",
-        size: 0,
-        mimeType: "inode/directory",
-        uploadDate: new Date().toISOString(),
-        category: "folder",
-        tags: ["avatar", "system-folder"],
-        description: "User profile pictures avatar directory",
-        downloadCount: 0,
-        uploadedBy: "administrator",
-        uploadedByRole: "administrator",
-        isFolder: true,
-        folderPath: "",
-      });
-      modified = true;
+    // Strip any deleted IDs
+    const deletedIds = getDeletedIds();
+    let finalRecords = records;
+    if (deletedIds.size > 0) {
+      const beforeCount = records.length;
+      finalRecords = records.filter((r) => !deletedIds.has(r.id));
+      if (finalRecords.length !== beforeCount) {
+        modified = true;
+      }
     }
 
     if (modified) {
-      saveMetadata(records);
+      saveMetadata(finalRecords);
     }
 
-    return records;
+    return finalRecords;
   } catch (err) {
     console.error("Error reading metadata:", err);
     return [];
@@ -849,6 +865,10 @@ const upload = multer({
 
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
+
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
 
 // --- API ROUTES ---
 
@@ -2182,10 +2202,6 @@ app.delete("/api/files/:id", (req, res) => {
   let records = getMetadata();
   const record = records.find((r) => r.id === id);
 
-  if (record && (record.id === "folder-avatar" || (record.isFolder && record.originalName.toLowerCase() === "avatar"))) {
-    return res.status(403).json({ error: "The system avatar folder cannot be deleted." });
-  }
-
   const idsToDelete = record ? getRecursiveDeletionList([record.id], records).map((r) => r.id) : [id];
   const deleteSet = new Set(idsToDelete);
 
@@ -2202,14 +2218,18 @@ app.delete("/api/files/:id", (req, res) => {
     }
   }
 
-  addDeletedIds(Array.from(deleteSet));
-  syncDeleteMetadataFromFirestore(Array.from(deleteSet));
-  Array.from(deleteSet).forEach((delId) => deleteFileChunksFromFirestore(delId));
+  const deleteArray = Array.from(deleteSet);
+  addDeletedIds(deleteArray);
+  syncDeleteMetadataFromFirestore(deleteArray);
+  deleteArray.forEach((delId) => deleteFileChunksFromFirestore(delId));
 
   records = records.filter((r) => !deleteSet.has(r.id));
   saveMetadata(records);
 
-  res.json({ message: record?.isFolder ? "Folder and its contents deleted successfully" : "Deleted successfully" });
+  res.json({
+    message: record?.isFolder ? "Folder and its contents deleted successfully" : "Deleted successfully",
+    deletedIds: deleteArray,
+  });
 });
 
 // 10. Bulk Delete
@@ -2220,13 +2240,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
     return res.status(400).json({ error: "No item IDs provided" });
   }
 
-  // Filter out system avatar folder
-  const filterSystemAvatar = (id: string) => id !== "folder-avatar";
-  const requestedIds = ids.filter(filterSystemAvatar);
-
-  if (requestedIds.length === 0) {
-    return res.status(400).json({ error: "System folder cannot be deleted" });
-  }
+  const requestedIds = ids;
 
   let records = getMetadata();
   const targetRecords = records.filter((r) => requestedIds.includes(r.id));
@@ -2260,7 +2274,80 @@ app.post("/api/files/bulk-delete", (req, res) => {
   records = records.filter((r) => !allIdsToDelete.has(r.id));
   saveMetadata(records);
 
-  res.json({ message: `${deleteArray.length} item(s) deleted successfully` });
+  res.json({
+    message: `${deleteArray.length} item(s) deleted successfully`,
+    deletedIds: deleteArray,
+  });
+});
+
+// 11. Clear All Server Storage (Purge & Reset to 0)
+app.post("/api/files/clear-all", async (req, res) => {
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || "normal";
+  if (requesterRole !== "administrator") {
+    return res.status(403).json({ error: "Only administrators can clear server storage" });
+  }
+
+  try {
+    const records = getMetadata();
+    const allIds = records.map((r) => r.id);
+
+    // 1. Delete physical files from uploads directory
+    try {
+      const items = fs.readdirSync(UPLOADS_DIR);
+      for (const item of items) {
+        if (item !== "settings.json" && item !== "temp_chunks") {
+          const fullPath = path.join(UPLOADS_DIR, item);
+          try {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
+    // 2. Clear metadata & deleted_ids
+    saveMetadata([]);
+    saveDeletedIds([]);
+
+    // 3. Mark clear flag
+    const clearFlagPath = path.join(UPLOADS_DIR, "storage_cleared.flag");
+    try {
+      fs.writeFileSync(clearFlagPath, JSON.stringify({ clearedAt: new Date().toISOString() }), "utf-8");
+    } catch (e) {}
+
+    // 4. Clean Firestore files & file_chunks in background
+    const db = getDb();
+    if (db && !isFirestoreQuotaExceeded) {
+      Promise.resolve().then(async () => {
+        try {
+          const filesSnap = await getDocs(collection(db, "files"));
+          filesSnap.forEach((d) => {
+            deleteDoc(d.ref).catch(() => {});
+          });
+        } catch (e) {
+          handleFirestoreQuotaError(e, "clear-all files");
+        }
+
+        try {
+          const chunksSnap = await getDocs(collection(db, "file_chunks"));
+          chunksSnap.forEach((d) => {
+            deleteDoc(d.ref).catch(() => {});
+          });
+        } catch (e) {
+          handleFirestoreQuotaError(e, "clear-all chunks");
+        }
+      }).catch(() => {});
+    }
+
+    res.json({
+      message: "Server storage cleared successfully. 0 files remaining.",
+      totalFiles: 0,
+      totalSize: 0,
+      clearedIds: allIds,
+    });
+  } catch (err: any) {
+    console.error("Error clearing server storage:", err);
+    res.status(500).json({ error: "Failed to clear server storage: " + (err.message || err) });
+  }
 });
 
 // Global Express & Multer Error Handling Middleware

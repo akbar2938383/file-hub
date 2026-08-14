@@ -163,22 +163,6 @@ export default function App() {
       }
     }
 
-    const rawFiles = localStorage.getItem('vault_files_backup');
-    if (rawFiles) {
-      try {
-        const cachedFiles = JSON.parse(rawFiles);
-        if (Array.isArray(cachedFiles) && cachedFiles.length > 0) {
-          fetch('/api/files/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: cachedFiles }),
-          }).catch((err) => console.error('Initial files metadata sync failed:', err));
-        }
-      } catch (e) {
-        console.error('Error parsing stored files backup:', e);
-      }
-    }
-
     return () => clearInterval(interval);
   }, [fetchWallpaperSettings]);
 
@@ -321,47 +305,23 @@ export default function App() {
 
       serverRecords = filterAvatars(serverRecords);
 
-      // Persistent records from browser IndexedDB
-      const localRecords = await idbGetAllRecords();
-      const filteredLocal = filterAvatars(localRecords);
-
-      // Identify local records missing from server records
-      const serverIdSet = new Set(serverRecords.map((r) => r.id));
-      const missingFromServer = filteredLocal.filter((r) => !serverIdSet.has(r.id));
-
-      let finalFilesList: FileRecord[] = [...serverRecords];
-
-      if (missingFromServer.length > 0) {
-        const matchesCategory = (f: FileRecord) => {
-          if (activeCategory === 'all') return true;
-          if (f.isFolder || f.category === 'folder') return true;
-          return f.category === activeCategory;
-        };
-        const matchesSearch = (f: FileRecord) => {
-          if (!debouncedSearchTerm) return true;
-          const lower = debouncedSearchTerm.toLowerCase();
-          return (
-            f.originalName.toLowerCase().includes(lower) ||
-            (f.description && f.description.toLowerCase().includes(lower)) ||
-            (f.tags && f.tags.some((t) => t.toLowerCase().includes(lower)))
-          );
-        };
-
-        const matchingMissing = missingFromServer.filter(
-          (f) => matchesCategory(f) && matchesSearch(f)
-        );
-
-        finalFilesList = [...serverRecords, ...matchingMissing];
-
-        // Restore missing files back to server in background
-        rehydrateServerWithLocalRecords(missingFromServer);
-      }
-
-      setFiles(finalFilesList);
-      idbSaveRecords(finalFilesList);
+      setFiles(serverRecords);
+      idbSaveRecords(serverRecords);
       try {
-        localStorage.setItem('vault_files_backup', JSON.stringify(finalFilesList));
+        localStorage.setItem('vault_files_backup', JSON.stringify(serverRecords));
       } catch (e) {}
+
+      // If full file list was fetched, prune local IndexedDB records that were deleted on the server
+      if (activeCategory === 'all' && !debouncedSearchTerm) {
+        try {
+          const localRecords = await idbGetAllRecords();
+          const serverIdSet = new Set(serverRecords.map((r) => r.id));
+          const obsoleteIds = localRecords.filter((r) => !serverIdSet.has(r.id)).map((r) => r.id);
+          if (obsoleteIds.length > 0) {
+            await idbDeleteRecords(obsoleteIds);
+          }
+        } catch (e) {}
+      }
 
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -547,28 +507,19 @@ export default function App() {
 
   const requestSingleDelete = (id: string) => {
     const targetFile = files.find((f) => f.id === id);
-    if (id === 'folder-avatar' || (targetFile?.isFolder && targetFile.originalName.toLowerCase() === 'avatar')) {
-      showToast('The system avatar folder cannot be deleted.', 'error');
-      return;
-    }
     setDeleteTarget({ id, name: targetFile ? targetFile.originalName : 'this item' });
   };
 
   const requestBulkDelete = () => {
     if (selectedIds.length === 0) return;
-    const filterSystemFolder = selectedIds.filter((id) => id !== 'folder-avatar');
-    if (filterSystemFolder.length === 0) {
-      showToast('System avatar folder cannot be deleted.', 'error');
-      return;
-    }
-    setDeleteTarget({ bulk: true, name: `${filterSystemFolder.length} selected item(s)` });
+    setDeleteTarget({ bulk: true, name: `${selectedIds.length} selected item(s)` });
   };
 
   const confirmExecutionDelete = async () => {
     if (!deleteTarget) return;
 
     if (deleteTarget.bulk) {
-      const idsToDelete = selectedIds.filter((id) => id !== 'folder-avatar');
+      const idsToDelete = [...selectedIds];
       try {
         const res = await fetch('/api/files/bulk-delete', {
           method: 'POST',
@@ -579,12 +530,24 @@ export default function App() {
           body: JSON.stringify({ ids: idsToDelete, userRole: currentUser?.role || 'normal' }),
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok && res.status !== 404) throw new Error(data.error || 'Bulk delete failed');
 
-        await idbDeleteRecords(idsToDelete);
-        setFiles((prev) => prev.filter((f) => !idsToDelete.includes(f.id)));
-        showToast(data.message || `${idsToDelete.length} item(s) deleted successfully`, 'success');
+        const deletedIds: string[] = Array.isArray(data.deletedIds) ? data.deletedIds : idsToDelete;
+        await idbDeleteRecords(deletedIds);
+        setFiles((prev) => prev.filter((f) => !deletedIds.includes(f.id)));
+
+        try {
+          const raw = localStorage.getItem('vault_files_backup');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              localStorage.setItem('vault_files_backup', JSON.stringify(parsed.filter((f: any) => !deletedIds.includes(f.id))));
+            }
+          }
+        } catch (e) {}
+
+        showToast(data.message || `${deletedIds.length} item(s) deleted successfully`, 'success');
         setSelectedIds([]);
         fetchFiles();
         fetchStats();
@@ -603,13 +566,25 @@ export default function App() {
           },
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok && res.status !== 404) throw new Error(data.error || 'Delete failed');
 
-        await idbDeleteRecord(targetId);
-        setFiles((prev) => prev.filter((f) => f.id !== targetId));
+        const deletedIds: string[] = Array.isArray(data.deletedIds) ? data.deletedIds : [targetId];
+        await idbDeleteRecords(deletedIds);
+        setFiles((prev) => prev.filter((f) => !deletedIds.includes(f.id)));
+
+        try {
+          const raw = localStorage.getItem('vault_files_backup');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              localStorage.setItem('vault_files_backup', JSON.stringify(parsed.filter((f: any) => !deletedIds.includes(f.id))));
+            }
+          }
+        } catch (e) {}
+
         showToast(data.message || 'Folder or file deleted successfully', 'success');
-        setSelectedIds((prev) => prev.filter((i) => i !== targetId));
+        setSelectedIds((prev) => prev.filter((i) => !deletedIds.includes(i)));
         fetchFiles();
         fetchStats();
       } catch (err: any) {
@@ -617,6 +592,40 @@ export default function App() {
       } finally {
         setDeleteTarget(null);
       }
+    }
+  };
+
+  const handleClearAllStorage = async () => {
+    try {
+      const res = await fetch('/api/files/clear-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'normal',
+        },
+        body: JSON.stringify({ userRole: currentUser?.role || 'normal' }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to clear server storage');
+
+      // Clear local IndexedDB and localStorage backup
+      const allLocalRecords = await idbGetAllRecords();
+      const allLocalIds = allLocalRecords.map((r) => r.id);
+      if (allLocalIds.length > 0) {
+        await idbDeleteRecords(allLocalIds);
+      }
+      try {
+        localStorage.removeItem('vault_files_backup');
+      } catch (e) {}
+
+      setFiles([]);
+      setSelectedIds([]);
+      showToast(data.message || 'Server storage cleared successfully to 0 files.', 'success');
+      fetchFiles();
+      fetchStats();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to clear server storage', 'error');
     }
   };
 
@@ -876,7 +885,11 @@ export default function App() {
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
               
               {/* Storage Summary Card */}
-              <StorageSummaryCard stats={stats} />
+              <StorageSummaryCard
+                stats={stats}
+                currentUser={currentUser}
+                onClearStorage={handleClearAllStorage}
+              />
 
               {/* File Manager Section */}
               <FileList
