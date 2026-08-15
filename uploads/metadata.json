@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "cc1efd9a-7723-459a-a22a-052fe3a216f0",
+    "originalName": "my_persistent_doc.txt",
+    "filename": "1786787869044-b919fdd5.txt",
+    "size": 39,
+    "mimeType": "text/plain",
+    "uploadDate": "2026-08-15T09:57:49.047Z",
+    "category": "document",
+    "tags": [],
+    "description": "",
+    "downloadCount": 0,
+    "uploadedBy": "administrator",
+    "uploadedByRole": "administrator",
+    "folderPath": "",
+    "relativePath": "my_persistent_doc.txt"
+  }
+]

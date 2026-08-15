@@ -305,22 +305,49 @@ export default function App() {
 
       serverRecords = filterAvatars(serverRecords);
 
-      setFiles(serverRecords);
-      idbSaveRecords(serverRecords);
-      try {
-        localStorage.setItem('vault_files_backup', JSON.stringify(serverRecords));
-      } catch (e) {}
-
-      // If full file list was fetched, prune local IndexedDB records that were deleted on the server
-      if (activeCategory === 'all' && !debouncedSearchTerm) {
+      // If server returned records, update files and sync to IndexedDB
+      if (serverRecords.length > 0) {
+        setFiles(serverRecords);
+        idbSaveRecords(serverRecords);
         try {
-          const localRecords = await idbGetAllRecords();
-          const serverIdSet = new Set(serverRecords.map((r) => r.id));
-          const obsoleteIds = localRecords.filter((r) => !serverIdSet.has(r.id)).map((r) => r.id);
-          if (obsoleteIds.length > 0) {
-            await idbDeleteRecords(obsoleteIds);
-          }
+          localStorage.setItem('vault_files_backup', JSON.stringify(serverRecords));
         } catch (e) {}
+
+        // If full file list was fetched, prune local IndexedDB records that were deleted on the server
+        if (activeCategory === 'all' && !debouncedSearchTerm) {
+          try {
+            const localRecords = await idbGetAllRecords();
+            const serverIdSet = new Set(serverRecords.map((r) => r.id));
+            const obsoleteIds = localRecords.filter((r) => !serverIdSet.has(r.id)).map((r) => r.id);
+            if (obsoleteIds.length > 0) {
+              await idbDeleteRecords(obsoleteIds);
+            }
+          } catch (e) {}
+        }
+      } else {
+        // If server returned 0 records, check if we have local cached records to recover from
+        const localRecords = await idbGetAllRecords();
+        const filteredLocal = currentUser?.role === 'administrator'
+          ? localRecords
+          : localRecords.filter((r) => {
+              const isAvatarFile =
+                r.tags?.includes('avatar') ||
+                r.tags?.includes('user-pfp') ||
+                r.id?.startsWith('avatar-') ||
+                r.originalName?.startsWith('Avatar_') ||
+                r.folderPath === 'avatar' ||
+                r.folderPath?.startsWith('avatar/');
+              const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
+              return !isAvatarFile && !isAvatarFolder;
+            });
+
+        if (filteredLocal.length > 0 && activeCategory === 'all' && !debouncedSearchTerm) {
+          // Keep showing local files and rehydrate server
+          setFiles(filteredLocal);
+          rehydrateServerWithLocalRecords(filteredLocal);
+        } else {
+          setFiles([]);
+        }
       }
 
     } catch (err: any) {

@@ -1,0 +1,113 @@
+{
+  "activeWallpaper": {
+    "brightness": 0.85,
+    "updatedBy": "System Administrator",
+    "isLive": false,
+    "id": "wp-1",
+    "liveType": "aurora",
+    "url": "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80",
+    "overlayOpacity": 0.35,
+    "videoUrl": "",
+    "updatedAt": "2026-08-15T09:50:53.195Z",
+    "name": "Aurora Borealis Night",
+    "blur": 0
+  },
+  "presets": [
+    {
+      "isLive": true,
+      "url": "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80",
+      "category": "Live Animated",
+      "name": "✨ Live Aurora Boreal Wave",
+      "liveType": "aurora",
+      "id": "wp-live-1"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=2000&q=80",
+      "liveType": "particles",
+      "id": "wp-live-2",
+      "isLive": true,
+      "name": "🌌 Live Cosmic Star Particles",
+      "category": "Live Animated"
+    },
+    {
+      "category": "Live Animated",
+      "name": "🔮 Live Deep Nebula Glow",
+      "id": "wp-live-3",
+      "isLive": true,
+      "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=2000&q=80",
+      "liveType": "nebula"
+    },
+    {
+      "liveType": "matrix",
+      "name": "💻 Live Digital Matrix Rain",
+      "id": "wp-live-4",
+      "isLive": true,
+      "url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=2000&q=80",
+      "category": "Live Animated"
+    },
+    {
+      "isLive": true,
+      "liveType": "waves",
+      "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2000&q=80",
+      "name": "🌊 Live Fluid Wave Flow",
+      "id": "wp-live-5",
+      "category": "Live Animated"
+    },
+    {
+      "liveType": "cybergrid",
+      "id": "wp-live-6",
+      "name": "🌐 Live Synthwave Cyber Grid",
+      "category": "Live Animated",
+      "url": "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=2000&q=80",
+      "isLive": true
+    },
+    {
+      "category": "Nature",
+      "name": "Aurora Borealis Night",
+      "id": "wp-1",
+      "url": "https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=2000&q=80"
+    },
+    {
+      "category": "Cyberpunk",
+      "url": "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=2000&q=80",
+      "id": "wp-2",
+      "name": "Cyberpunk Neon City"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=2000&q=80",
+      "name": "Minimalist Mountain Range",
+      "category": "Landscape",
+      "id": "wp-3"
+    },
+    {
+      "category": "Space",
+      "url": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=2000&q=80",
+      "name": "Deep Cosmic Nebula",
+      "id": "wp-4"
+    },
+    {
+      "category": "Abstract",
+      "name": "Abstract Geometric Glass",
+      "id": "wp-5",
+      "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=2000&q=80"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=2000&q=80",
+      "category": "Nature",
+      "id": "wp-6",
+      "name": "Misty Pine Forest"
+    },
+    {
+      "name": "Golden Sunset Ocean",
+      "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2000&q=80",
+      "id": "wp-7",
+      "category": "Nature"
+    },
+    {
+      "name": "Dark Tech Hex Matrix",
+      "id": "wp-8",
+      "url": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=2000&q=80",
+      "category": "Cyberpunk"
+    }
+  ]
+}

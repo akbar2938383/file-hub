@@ -1,0 +1,39 @@
+[
+  {
+    "avatar": "/api/files/avatar-e21ed804-20fb-46a7-94ee-ec14f85941d2/view",
+    "fullName": "ran",
+    "createdAt": "2026-08-06T16:07:38.072Z",
+    "role": "normal",
+    "id": "user-f4162ec3",
+    "password": "ran",
+    "username": "ran"
+  },
+  {
+    "lastLoginAt": "2026-08-06T16:07:21.163Z",
+    "id": "user-admin-1",
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "fullName": "System Administrator",
+    "role": "administrator",
+    "username": "akbar293838",
+    "password": "27112009"
+  },
+  {
+    "fullName": "y",
+    "createdAt": "2026-08-05T09:57:16.265Z",
+    "id": "user-e058903d",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80",
+    "role": "normal",
+    "password": "y",
+    "username": "if this gone,the serever is bullshit"
+  },
+  {
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
+    "fullName": "John Normal User",
+    "id": "user-normal-1",
+    "password": "user123",
+    "username": "user",
+    "role": "normal"
+  }
+]

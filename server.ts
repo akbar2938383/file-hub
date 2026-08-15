@@ -324,69 +324,63 @@ async function syncFromFirestore() {
     // 1. Files Sync
     const filesSnap = await getDocs(collection(db, "files"));
     const deletedIds = getDeletedIds();
-    const isStorageClearedLocally = fs.existsSync(path.join(UPLOADS_DIR, "storage_cleared.flag"));
 
     if (!filesSnap.empty) {
-      if (isStorageClearedLocally) {
-        // If storage was wiped clean by admin, purge remote ghost documents from Firestore
-        filesSnap.forEach((docSnap) => {
-          deleteDoc(docSnap.ref).catch(() => {});
-        });
-      } else {
-        const remoteRecords: FileRecord[] = [];
-        filesSnap.forEach((docSnap) => {
-          const fileData = docSnap.data() as FileRecord;
-          if (deletedIds.has(fileData.id)) {
-            // If already deleted locally, purge from Firestore
-            deleteDoc(doc(db, "files", fileData.id)).catch(() => {});
-          } else {
-            remoteRecords.push(fileData);
-          }
-        });
-
-        let localRecords: FileRecord[] = [];
-        try {
-          if (fs.existsSync(METADATA_FILE)) {
-            localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
-          }
-        } catch (e) {}
-
-        // Strip any deleted IDs from localRecords
-        localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
-
-        let updated = false;
-        for (const rr of remoteRecords) {
-          if (deletedIds.has(rr.id)) continue;
-          const idx = localRecords.findIndex((r) => r.id === rr.id);
-          if (idx === -1) {
-            localRecords.push(rr);
-            updated = true;
-          } else {
-            localRecords[idx] = { ...localRecords[idx], ...rr };
-            updated = true;
-          }
+      const remoteRecords: FileRecord[] = [];
+      filesSnap.forEach((docSnap) => {
+        const fileData = docSnap.data() as FileRecord;
+        if (deletedIds.has(fileData.id)) {
+          // If already deleted locally, purge from Firestore
+          deleteDoc(doc(db, "files", fileData.id)).catch(() => {});
+        } else {
+          remoteRecords.push(fileData);
         }
+      });
 
-        if (updated) {
-          fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
-          console.log(`Synced ${localRecords.length} file records from Firestore.`);
+      let localRecords: FileRecord[] = [];
+      try {
+        if (fs.existsSync(METADATA_FILE)) {
+          localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
         }
+      } catch (e) {}
 
-        // Pre-warm restoration of binary files onto disk
-        for (const rr of localRecords) {
-          if (!rr.isFolder && rr.filename) {
-            ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
-          }
+      // Strip any deleted IDs from localRecords
+      localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
+
+      let updated = false;
+      for (const rr of remoteRecords) {
+        if (deletedIds.has(rr.id)) continue;
+        const idx = localRecords.findIndex((r) => r.id === rr.id);
+        if (idx === -1) {
+          localRecords.push(rr);
+          updated = true;
+        } else {
+          localRecords[idx] = { ...localRecords[idx], ...rr };
+          updated = true;
+        }
+      }
+
+      if (updated || localRecords.length > 0) {
+        fs.writeFileSync(METADATA_FILE, JSON.stringify(localRecords, null, 2), "utf-8");
+        console.log(`Synced ${localRecords.length} file records from Firestore.`);
+      }
+
+      // Pre-warm restoration of binary files onto disk
+      for (const rr of localRecords) {
+        if (!rr.isFolder && rr.filename) {
+          ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
         }
       }
     } else {
-      // Seed initial local records to Firestore
+      // Seed initial local records to Firestore if local has files
       let localRecords: FileRecord[] = [];
       try {
         if (fs.existsSync(METADATA_FILE)) {
           localRecords = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8"));
           localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
-          syncSaveMetadataToFirestore(localRecords);
+          if (localRecords.length > 0) {
+            syncSaveMetadataToFirestore(localRecords);
+          }
         }
       } catch (e) {}
     }
@@ -2308,13 +2302,7 @@ app.post("/api/files/clear-all", async (req, res) => {
     saveMetadata([]);
     saveDeletedIds([]);
 
-    // 3. Mark clear flag
-    const clearFlagPath = path.join(UPLOADS_DIR, "storage_cleared.flag");
-    try {
-      fs.writeFileSync(clearFlagPath, JSON.stringify({ clearedAt: new Date().toISOString() }), "utf-8");
-    } catch (e) {}
-
-    // 4. Clean Firestore files & file_chunks in background
+    // 3. Clean Firestore files & file_chunks in background
     const db = getDb();
     if (db && !isFirestoreQuotaExceeded) {
       Promise.resolve().then(async () => {
