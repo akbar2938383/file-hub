@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileRecord, User } from '../types';
+import { canPerformFileAction } from '../utils/fileGuards';
 import { Edit3, X, Tag, FileText, Check, Loader2, ShieldAlert, Lock } from 'lucide-react';
 
 interface Props {
@@ -8,9 +9,10 @@ interface Props {
   onClose: () => void;
   onSave: () => void;
   currentUser?: User | null;
+  allFiles?: FileRecord[];
 }
 
-export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, currentUser }) => {
+export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, currentUser, allFiles = [] }) => {
   const [originalName, setOriginalName] = useState('');
   const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
@@ -33,6 +35,10 @@ export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canPerformFileAction('edit', file, currentUser, allFiles, (msg) => setError(msg))) {
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 

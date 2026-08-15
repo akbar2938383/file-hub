@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { FileRecord } from '../types';
+import { FileRecord, User } from '../types';
 import { formatBytes, formatDate } from '../utils/formatters';
-import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2, QrCode } from 'lucide-react';
+import { canPerformFileAction, isFileAdminProtected, isFileAdminOnly } from '../utils/fileGuards';
+import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2, QrCode, Lock } from 'lucide-react';
 import { idbGetBlob } from '../lib/idb';
 
 interface Props {
@@ -11,15 +12,72 @@ interface Props {
   onDownload: (file: FileRecord) => void;
   onDelete?: (id: string) => void;
   onQrCode?: (file: FileRecord) => void;
+  currentUser?: User | null;
+  showToast?: (msg: string, type?: 'success' | 'error') => void;
+  allFiles?: FileRecord[];
 }
 
-export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDownload, onDelete, onQrCode }) => {
+export const FilePreviewModal: React.FC<Props> = ({
+  file,
+  isOpen,
+  onClose,
+  onDownload,
+  onDelete,
+  onQrCode,
+  currentUser,
+  showToast,
+  allFiles = [],
+}) => {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [textError, setTextError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedContent, setCopiedContent] = useState(false);
   const [localMediaUrl, setLocalMediaUrl] = useState<string | null>(null);
+
+  const isUserAdmin = currentUser?.role === 'administrator';
+  const isProtected = file ? (isFileAdminProtected(file, allFiles) && !isUserAdmin) : false;
+  const isRestrictedAdminOnly = file ? (isFileAdminOnly(file, allFiles) && !isUserAdmin) : false;
+
+  const notifyBlocked = (msg: string) => {
+    showToast?.(msg, 'error');
+  };
+
+  const handleDownload = () => {
+    if (!file) return;
+    if (!canPerformFileAction('download', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    onDownload(file);
+  };
+
+  const handleDelete = () => {
+    if (!file || !onDelete) return;
+    if (!canPerformFileAction('delete', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    onClose();
+    onDelete(file.id);
+  };
+
+  const handleQr = () => {
+    if (!file || !onQrCode) return;
+    if (!canPerformFileAction('qr', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    onQrCode(file);
+  };
+
+  const handleCopyLink = () => {
+    if (!file) return;
+    if (!canPerformFileAction('share', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    const directUrl = `${window.location.origin}/api/files/${file.id}/download`;
+    navigator.clipboard.writeText(directUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   useEffect(() => {
     let isSubscribed = true;
@@ -214,9 +272,14 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
             {onQrCode && (
               <button
                 id="qr-preview-file"
-                onClick={() => onQrCode(file)}
-                title="Mobile QR Code"
-                className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
+                disabled={isRestrictedAdminOnly}
+                onClick={handleQr}
+                title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Mobile QR Code"}
+                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 ${
+                  isRestrictedAdminOnly
+                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
               >
                 <QrCode className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span className="hidden md:inline">QR Code</span>
@@ -225,9 +288,14 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
 
             <button
               id="copy-download-link"
-              onClick={copyDownloadLink}
-              title="Copy download URL"
-              className="p-1.5 sm:p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700"
+              disabled={isRestrictedAdminOnly}
+              onClick={handleCopyLink}
+              title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Copy download URL"}
+              className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 ${
+                isRestrictedAdminOnly
+                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
             >
               {copiedLink ? <Check className="w-4 h-4 text-emerald-500 shrink-0" /> : <Share2 className="w-4 h-4 shrink-0" />}
               <span className="hidden sm:inline">{copiedLink ? 'Copied' : 'Share'}</span>
@@ -235,9 +303,14 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
 
             <button
               id="download-preview-file"
-              onClick={() => onDownload(file)}
-              title="Download file"
-              className="p-1.5 sm:p-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg sm:rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors"
+              disabled={isRestrictedAdminOnly}
+              onClick={handleDownload}
+              title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Download file"}
+              className={`p-1.5 sm:p-2 sm:px-3 rounded-lg sm:rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors ${
+                isRestrictedAdminOnly
+                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
             >
               <Download className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Download</span>
@@ -246,14 +319,16 @@ export const FilePreviewModal: React.FC<Props> = ({ file, isOpen, onClose, onDow
             {onDelete && (
               <button
                 id="delete-preview-file"
-                onClick={() => {
-                  onClose();
-                  onDelete(file.id);
-                }}
-                title="Delete file"
-                className="p-1.5 sm:p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg sm:rounded-xl transition-colors"
+                disabled={isProtected}
+                onClick={handleDelete}
+                title={isProtected ? "Protected: Administrator files cannot be deleted by members" : "Delete file"}
+                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors ${
+                  isProtected
+                    ? 'text-amber-500 hover:bg-amber-500/10 cursor-not-allowed opacity-80'
+                    : 'text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40'
+                }`}
               >
-                <Trash2 className="w-4 h-4 shrink-0" />
+                {isProtected ? <Lock className="w-4 h-4 text-amber-500 shrink-0" /> : <Trash2 className="w-4 h-4 shrink-0" />}
               </button>
             )}
 

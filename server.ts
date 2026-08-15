@@ -1414,6 +1414,32 @@ function isRecordAdminOnly(record: FileRecord, allRecords: FileRecord[]): boolea
   return false;
 }
 
+/**
+ * Checks if a file or folder is protected from regular members.
+ * Protected items include:
+ * 1. Admin-Only items (isAdminOnly: true directly or via parent folder)
+ * 2. Items uploaded/created by an administrator (uploadedByRole === 'administrator')
+ * 3. Items located inside a parent folder uploaded/created by an administrator
+ */
+function isRecordAdminProtected(record: FileRecord, allRecords: FileRecord[]): boolean {
+  if (record.isAdminOnly) return true;
+  if (record.uploadedByRole === "administrator") return true;
+  if (!record.folderPath) return false;
+
+  const parts = record.folderPath.split("/").filter(Boolean);
+  let currentAccum = "";
+  for (let i = 0; i < parts.length; i++) {
+    const parentFolder = allRecords.find(
+      (r) => r.isFolder && (r.folderPath || "") === currentAccum && r.originalName.toLowerCase() === parts[i].toLowerCase()
+    );
+    if (parentFolder && (parentFolder.isAdminOnly || parentFolder.uploadedByRole === "administrator")) {
+      return true;
+    }
+    currentAccum = currentAccum ? `${currentAccum}/${parts[i]}` : parts[i];
+  }
+  return false;
+}
+
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
   const { search, category, sort } = req.query;
@@ -2138,13 +2164,18 @@ app.get("/api/files/:id/content", async (req, res) => {
 app.put("/api/files/:id", (req, res) => {
   const { id } = req.params;
   const { originalName, description, tags, isAdminOnly } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || "normal";
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
 
   const records = getMetadata();
   const index = records.findIndex((r) => r.id === id);
 
   if (index === -1) {
     return res.status(404).json({ error: "File not found" });
+  }
+
+  // Permission check: Non-administrators cannot modify admin-uploaded or admin-only files/folders
+  if (requesterRole !== "administrator" && isRecordAdminProtected(records[index], records)) {
+    return res.status(403).json({ error: "Access denied. Cannot modify files or folders created by administrator." });
   }
 
   if (originalName && typeof originalName === "string") {
@@ -2168,7 +2199,7 @@ app.put("/api/files/:id", (req, res) => {
 // Toggle Admin Only Access Endpoint
 app.post("/api/files/:id/toggle-admin-only", (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || "normal";
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
 
   if (requesterRole !== "administrator") {
     return res.status(403).json({ error: "Only administrators can toggle admin-only status" });
@@ -2287,10 +2318,25 @@ function getRecursiveDeletionList(targetIds: string[], allRecords: FileRecord[])
 // 9. Delete File or Folder
 app.delete("/api/files/:id", (req, res) => {
   const { id } = req.params;
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || (req.body.userRole as string) || "normal";
   let records = getMetadata();
   const record = records.find((r) => r.id === id);
 
-  const idsToDelete = record ? getRecursiveDeletionList([record.id], records).map((r) => r.id) : [id];
+  if (!record) {
+    return res.status(404).json({ error: "File or folder not found" });
+  }
+
+  const recursiveList = getRecursiveDeletionList([record.id], records);
+
+  // Permission check: Non-administrators CANNOT delete items protected by administrator
+  if (requesterRole !== "administrator") {
+    const hasProtected = recursiveList.some((r) => isRecordAdminProtected(r, records));
+    if (hasProtected) {
+      return res.status(403).json({ error: "Access denied. Cannot delete files or folders protected by administrator." });
+    }
+  }
+
+  const idsToDelete = recursiveList.map((r) => r.id);
   const deleteSet = new Set(idsToDelete);
 
   for (const itemRecord of records) {
@@ -2323,6 +2369,7 @@ app.delete("/api/files/:id", (req, res) => {
 // 10. Bulk Delete
 app.post("/api/files/bulk-delete", (req, res) => {
   const { ids } = req.body;
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
 
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: "No item IDs provided" });
@@ -2337,11 +2384,20 @@ app.post("/api/files/bulk-delete", (req, res) => {
   // Get recursive deletion list for existing records
   const recursiveItems = getRecursiveDeletionList(targetIds, records);
 
-  // Combine directly requested IDs and resolved child items
-  const allIdsToDelete = new Set([...requestedIds, ...recursiveItems.map((r) => r.id)]);
+  // Filter out protected items if requester is not an administrator
+  let itemsToDelete = recursiveItems;
+  if (requesterRole !== "administrator") {
+    itemsToDelete = recursiveItems.filter((r) => !isRecordAdminProtected(r, records));
+    if (itemsToDelete.length === 0) {
+      return res.status(403).json({ error: "Access denied. Selected items are protected by administrator and cannot be removed." });
+    }
+  }
+
+  // Combine directly requested IDs and resolved child items that are allowed
+  const allIdsToDelete = new Set(itemsToDelete.map((r) => r.id));
 
   // Remove physical files
-  for (const record of recursiveItems) {
+  for (const record of itemsToDelete) {
     if (!record.isFolder && record.filename) {
       const filePath = path.join(UPLOADS_DIR, record.filename);
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {

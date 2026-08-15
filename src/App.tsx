@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings } from './types';
 import { idbSaveRecords, idbGetAllRecords, idbGetBlob, idbDeleteRecord, idbDeleteRecords } from './lib/idb';
+import { canPerformFileAction, isFileAdminOnly, isFileAdminProtected } from './utils/fileGuards';
 import { Navbar } from './components/Navbar';
 import { StorageSummaryCard } from './components/StorageSummaryCard';
 import { FileList } from './components/FileList';
@@ -288,9 +289,10 @@ export default function App() {
         }
       }
 
-      const filterAvatars = (records: FileRecord[]) => {
+      const filterAvatarsAndAdminOnly = (records: FileRecord[]) => {
         if (currentUser?.role === 'administrator') return records;
         return records.filter((r: FileRecord) => {
+          if (isFileAdminOnly(r, records)) return false;
           const isAvatarFile =
             r.tags?.includes('avatar') ||
             r.tags?.includes('user-pfp') ||
@@ -303,7 +305,7 @@ export default function App() {
         });
       };
 
-      serverRecords = filterAvatars(serverRecords);
+      serverRecords = filterAvatarsAndAdminOnly(serverRecords);
 
       // If server returned records, update files and sync to IndexedDB
       if (serverRecords.length > 0) {
@@ -327,19 +329,7 @@ export default function App() {
       } else {
         // If server returned 0 records, check if we have local cached records to recover from
         const localRecords = await idbGetAllRecords();
-        const filteredLocal = currentUser?.role === 'administrator'
-          ? localRecords
-          : localRecords.filter((r) => {
-              const isAvatarFile =
-                r.tags?.includes('avatar') ||
-                r.tags?.includes('user-pfp') ||
-                r.id?.startsWith('avatar-') ||
-                r.originalName?.startsWith('Avatar_') ||
-                r.folderPath === 'avatar' ||
-                r.folderPath?.startsWith('avatar/');
-              const isAvatarFolder = r.isFolder && r.originalName.toLowerCase() === 'avatar';
-              return !isAvatarFile && !isAvatarFolder;
-            });
+        const filteredLocal = filterAvatarsAndAdminOnly(localRecords);
 
         if (filteredLocal.length > 0 && activeCategory === 'all' && !debouncedSearchTerm) {
           // Keep showing local files and rehydrate server
@@ -359,6 +349,7 @@ export default function App() {
       const filteredLocal = currentUser?.role === 'administrator'
         ? localRecords
         : localRecords.filter((r) => {
+            if (isFileAdminOnly(r, localRecords)) return false;
             const isAvatarFile =
               r.tags?.includes('avatar') ||
               r.tags?.includes('user-pfp') ||
@@ -476,6 +467,10 @@ export default function App() {
   };
 
   const handleDownloadFile = async (file: FileRecord) => {
+    if (!canPerformFileAction('download', file, currentUser, files, (msg) => showToast(msg, 'error'))) {
+      return;
+    }
+
     if (file.isFolder || file.category === 'folder') {
       showToast(`Compressing folder "${file.originalName}" into ZIP archive...`, 'success');
       try {
@@ -534,11 +529,38 @@ export default function App() {
 
   const requestSingleDelete = (id: string) => {
     const targetFile = files.find((f) => f.id === id);
-    setDeleteTarget({ id, name: targetFile ? targetFile.originalName : 'this item' });
+    if (!targetFile) return;
+
+    if (!canPerformFileAction('delete', targetFile, currentUser, files, (msg) => showToast(msg, 'error'))) {
+      return;
+    }
+
+    setDeleteTarget({ id, name: targetFile.originalName });
   };
 
   const requestBulkDelete = () => {
     if (selectedIds.length === 0) return;
+
+    if (currentUser?.role !== 'administrator') {
+      const protectedItems = selectedIds.filter((id) => {
+        const f = files.find((item) => item.id === id);
+        return f && !canPerformFileAction('delete', f, currentUser, files);
+      });
+
+      if (protectedItems.length === selectedIds.length) {
+        showToast('Protected: Selected item(s) are created by administrators and cannot be deleted.', 'error');
+        return;
+      }
+
+      if (protectedItems.length > 0) {
+        const allowedIds = selectedIds.filter((id) => !protectedItems.includes(id));
+        setSelectedIds(allowedIds);
+        showToast(`Skipped ${protectedItems.length} administrator-protected item(s).`, 'error');
+        setDeleteTarget({ bulk: true, name: `${allowedIds.length} selected item(s)` });
+        return;
+      }
+    }
+
     setDeleteTarget({ bulk: true, name: `${selectedIds.length} selected item(s)` });
   };
 
@@ -993,6 +1015,7 @@ export default function App() {
         isOpen={!!editingFile}
         onClose={() => setEditingFile(null)}
         currentUser={currentUser}
+        allFiles={files}
         onSave={() => {
           showToast('File details updated');
           fetchFiles();
@@ -1006,6 +1029,9 @@ export default function App() {
         onDownload={handleDownloadFile}
         onDelete={requestSingleDelete}
         onQrCode={(f) => setQrCodeFile(f)}
+        currentUser={currentUser}
+        allFiles={files}
+        showToast={showToast}
       />
 
       <QRCodeModal

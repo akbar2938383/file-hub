@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileRecord, ViewMode, SortOption, StorageStats, User } from '../types';
 import { FileCard } from './FileCard';
+import { canPerformFileAction } from '../utils/fileGuards';
 import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2, Upload, Lock } from 'lucide-react';
 
 interface Props {
@@ -79,7 +80,10 @@ export const FileList: React.FC<Props> = ({
         return normalizePath(f.folderPath) === normalizePath(currentFolderPath);
       });
 
-  const allSelected = displayedFiles.length > 0 && selectedIds.length === displayedFiles.length;
+  const selectableFiles = displayedFiles.filter((f) =>
+    canPerformFileAction('select', f, currentUser, files)
+  );
+  const allSelected = selectableFiles.length > 0 && selectedIds.length === selectableFiles.length;
 
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,11 +137,18 @@ export const FileList: React.FC<Props> = ({
     if (allSelected) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(displayedFiles.map((f) => f.id));
+      setSelectedIds(selectableFiles.map((f) => f.id));
     }
   };
 
   const toggleSelect = (id: string) => {
+    const target = files.find((f) => f.id === id);
+    if (
+      !selectedIds.includes(id) &&
+      !canPerformFileAction('select', target, currentUser, files, (msg) => showToast?.(msg, 'error'))
+    ) {
+      return;
+    }
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
@@ -385,6 +396,8 @@ export const FileList: React.FC<Props> = ({
               onQrCode={onQrCode}
               onOpenFolder={(targetFolder) => setCurrentFolderPath(targetFolder)}
               currentUser={currentUser}
+              showToast={showToast}
+              allFiles={files}
             />
           ))}
         </div>
