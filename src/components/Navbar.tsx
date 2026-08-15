@@ -60,11 +60,11 @@ export const Navbar: React.FC<Props> = ({
     onOpenCurl();
   };
   return (
-    <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors w-full overflow-hidden">
-      <div className="max-w-7xl mx-auto px-1.5 sm:px-4 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1 sm:gap-3 w-full">
+    <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors w-full">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 min-h-[3.5rem] sm:h-16 flex items-center justify-between gap-1.5 sm:gap-3 w-full flex-wrap sm:flex-nowrap py-1 sm:py-0">
         
         {/* Brand & Page Selector */}
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
           <div
             onClick={() => onNavigate('files')}
             className="hidden md:flex items-center gap-2 cursor-pointer group shrink-0"
@@ -89,7 +89,7 @@ export const Navbar: React.FC<Props> = ({
           <nav className="flex items-center bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-[11px] sm:text-xs font-semibold shrink-0">
             <button
               onClick={() => onNavigate(currentUser ? 'files' : 'login')}
-              className={`px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
                 activePage === 'files'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -104,7 +104,7 @@ export const Navbar: React.FC<Props> = ({
               <>
                 <button
                   onClick={() => onNavigate('wallpaper')}
-                  className={`px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
+                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
                     activePage === 'wallpaper'
                       ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -117,7 +117,7 @@ export const Navbar: React.FC<Props> = ({
 
                 <button
                   onClick={() => onNavigate('users')}
-                  className={`px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
+                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 ${
                     activePage === 'users'
                       ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -132,8 +132,8 @@ export const Navbar: React.FC<Props> = ({
           </nav>
         </div>
 
-        {/* Action Controls & User Account Menu - Touch friendly horizontal scrollable on mobile */}
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink min-w-0 overflow-x-auto no-scrollbar py-0.5 max-w-full">
+        {/* Action Controls & User Account Menu */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-wrap justify-end">
           
           {/* Theme Toggle Button */}
           {onToggleTheme && (

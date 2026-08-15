@@ -137,6 +137,12 @@ export const FileCard: React.FC<Props> = ({
                   <span>Admin</span>
                 </span>
               )}
+              {file.isAdminOnly && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1 shrink-0" title="Restricted to Administrators only">
+                  <Lock className="w-3 h-3 text-rose-500" />
+                  <span>Admin Only</span>
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 mt-1">
               {isFolder ? (
@@ -246,6 +252,12 @@ export const FileCard: React.FC<Props> = ({
             <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
               <ShieldCheck className="w-3 h-3" />
               <span>Admin</span>
+            </span>
+          )}
+          {file.isAdminOnly && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1 shrink-0" title="Restricted to Administrators only">
+              <Lock className="w-3 h-3 text-rose-500" />
+              <span>Admin Only</span>
             </span>
           )}
           <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-semibold border capitalize ${badgeClass}`}>

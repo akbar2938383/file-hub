@@ -992,6 +992,7 @@ export default function App() {
         file={editingFile}
         isOpen={!!editingFile}
         onClose={() => setEditingFile(null)}
+        currentUser={currentUser}
         onSave={() => {
           showToast('File details updated');
           fetchFiles();

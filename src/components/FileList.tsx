@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileRecord, ViewMode, SortOption, StorageStats, User } from '../types';
 import { FileCard } from './FileCard';
-import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2, Upload } from 'lucide-react';
+import { LayoutGrid, List, Search, ArrowUpDown, Trash2, Download, CheckSquare, Square, FolderOpen, Layers, Image, FileText, Film, Music, Code, Archive, Filter, FolderPlus, ChevronRight, Home, Plus, X, Loader2, Upload, Lock } from 'lucide-react';
 
 interface Props {
   files: FileRecord[];
@@ -64,7 +64,10 @@ export const FileList: React.FC<Props> = ({
 
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [isFolderAdminOnly, setIsFolderAdminOnly] = useState(false);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+
+  const isUserAdmin = currentUser?.role === 'administrator';
 
   const normalizePath = (p: string | undefined | null) =>
     (p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -86,11 +89,16 @@ export const FileList: React.FC<Props> = ({
     try {
       const res = await fetch('/api/folders/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'normal',
+          'x-username': currentUser?.username || 'public',
+        },
         body: JSON.stringify({
           name: newFolderName.trim(),
           parentFolderPath: currentFolderPath,
           uploadedByRole: currentUser?.role || 'normal',
+          isAdminOnly: isUserAdmin ? isFolderAdminOnly : undefined,
         }),
       });
 
@@ -99,6 +107,7 @@ export const FileList: React.FC<Props> = ({
 
       showToast?.(data.message || 'Folder created successfully!', 'success');
       setNewFolderName('');
+      setIsFolderAdminOnly(false);
       setIsCreateFolderOpen(false);
       onRefreshFiles?.();
     } catch (err: any) {
@@ -421,6 +430,40 @@ export const FileList: React.FC<Props> = ({
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-amber-500"
                 />
               </div>
+
+              {/* Admin Only Toggle (visible for administrators) */}
+              {isUserAdmin && (
+                <div className="p-3.5 rounded-2xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                        <span>Admin Only Folder</span>
+                        <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-semibold rounded">
+                          Restricted
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        This folder and all items placed within it will only be visible to administrators.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      id="admin-only-folder-toggle"
+                      checked={isFolderAdminOnly}
+                      onChange={(e) => setIsFolderAdminOnly(e.target.checked)}
+                      disabled={isCreatingFolder}
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
