@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings } from './types';
+import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings, DownloadTask } from './types';
 import { idbSaveRecords, idbGetAllRecords, idbGetBlob, idbDeleteRecord, idbDeleteRecords } from './lib/idb';
 import { canPerformFileAction, isFileAdminOnly, isFileAdminProtected } from './utils/fileGuards';
+import { formatSpeed } from './utils/formatters';
 import { Navbar } from './components/Navbar';
 import { StorageSummaryCard } from './components/StorageSummaryCard';
 import { FileList } from './components/FileList';
@@ -12,10 +13,12 @@ import { FilePreviewModal } from './components/FilePreviewModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { CurlGeneratorModal } from './components/CurlGeneratorModal';
 import { QRCodeModal } from './components/QRCodeModal';
+import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { LoginPage } from './components/LoginPage';
 import { WallpaperChangerPage } from './components/WallpaperChangerPage';
 import { UserControlPage } from './components/UserControlPage';
 import { LiveWallpaperCanvas } from './components/LiveWallpaperCanvas';
+import { DownloadProgressIndicator } from './components/DownloadProgressIndicator';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -93,9 +96,33 @@ export default function App() {
   const [previewingFile, setPreviewingFile] = useState<FileRecord | null>(null);
   const [qrCodeFile, setQrCodeFile] = useState<FileRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id?: string; bulk?: boolean; name?: string } | null>(null);
+  const [cutItemIds, setCutItemIds] = useState<string[]>([]);
+  const [movingItems, setMovingItems] = useState<FileRecord[] | null>(null);
 
   // Toast Feedback
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Active Streaming Download Tasks
+  const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>([]);
+
+  const handleCancelDownloadTask = (taskId: string) => {
+    setDownloadTasks((prev) => {
+      const target = prev.find((t) => t.id === taskId);
+      if (target?.abortController) {
+        try {
+          target.abortController.abort();
+        } catch (e) {}
+      }
+      return prev.map((t) => (t.id === taskId ? { ...t, status: 'cancelled' } : t));
+    });
+    setTimeout(() => {
+      setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+    }, 1500);
+  };
+
+  const handleDismissDownloadTask = (taskId: string) => {
+    setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+  };
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -415,7 +442,7 @@ export default function App() {
     }
   };
 
-  const handleClientFolderZipDownload = async (folderRecord: FileRecord) => {
+  const handleClientFolderZipDownload = async (folderRecord: FileRecord, onProgress?: (percent: number) => void) => {
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
 
@@ -461,9 +488,10 @@ export default function App() {
       zip.file(`${folderRecord.originalName}/.keep`, 'Empty Folder Archive');
     }
 
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+      if (onProgress) onProgress(Math.round(metadata.percent));
+    });
     triggerBrowserDownload(zipBlob, `${folderRecord.originalName}.zip`);
-    showToast(`Downloaded folder "${folderRecord.originalName}.zip"`, 'success');
   };
 
   const handleDownloadFile = async (file: FileRecord) => {
@@ -471,53 +499,256 @@ export default function App() {
       return;
     }
 
+    const taskId = `dl-${file.id}-${Date.now()}`;
+    const abortController = new AbortController();
+
+    const updateTask = (updates: Partial<DownloadTask>) => {
+      setDownloadTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
+      );
+    };
+
+    // Initialize download task tracking
+    const newTask: DownloadTask = {
+      id: taskId,
+      fileId: file.id,
+      fileName: file.isFolder ? `${file.originalName}.zip` : file.originalName,
+      category: file.isFolder ? 'folder' : file.category,
+      loadedBytes: 0,
+      totalBytes: file.size || 0,
+      progress: 0,
+      speed: '',
+      status: file.isFolder ? 'compressing' : 'starting',
+      startTime: Date.now(),
+      abortController,
+    };
+
+    setDownloadTasks((prev) => [newTask, ...prev.filter((t) => t.status === 'downloading' || t.status === 'compressing')]);
+
+    // Handle Folder ZIP Download
     if (file.isFolder || file.category === 'folder') {
-      showToast(`Compressing folder "${file.originalName}" into ZIP archive...`, 'success');
       try {
         const downloadUrl = `/api/files/${file.id}/download`;
-        const res = await fetch(downloadUrl);
+        const res = await fetch(downloadUrl, { signal: abortController.signal });
         if (res.ok) {
-          const blob = await res.blob();
-          triggerBrowserDownload(blob, `${file.originalName}.zip`);
-          showToast(`Downloaded folder "${file.originalName}.zip"`, 'success');
+          const contentLengthHeader = res.headers.get('content-length');
+          const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+
+          if (!res.body) {
+            const blob = await res.blob();
+            triggerBrowserDownload(blob, `${file.originalName}.zip`);
+            updateTask({
+              loadedBytes: blob.size,
+              totalBytes: blob.size,
+              progress: 100,
+              status: 'completed',
+              speed: '',
+            });
+            setTimeout(() => {
+              setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+            }, 3500);
+            return;
+          }
+
+          updateTask({ status: 'downloading' });
+          const reader = res.body.getReader();
+          let receivedBytes = 0;
+          const chunks: Uint8Array[] = [];
+          let lastTime = Date.now();
+          let lastLoaded = 0;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            receivedBytes += value.length;
+
+            const now = Date.now();
+            const timeDiff = (now - lastTime) / 1000;
+            let currentSpeed = '';
+            if (timeDiff >= 0.2) {
+              const bytesPerSec = (receivedBytes - lastLoaded) / timeDiff;
+              currentSpeed = formatSpeed(bytesPerSec);
+              lastTime = now;
+              lastLoaded = receivedBytes;
+            }
+
+            const calcTotal = total > 0 ? total : Math.max(receivedBytes, 1024 * 10);
+            const progress = total > 0 ? Math.min(99, Math.round((receivedBytes / total) * 100)) : 50;
+
+            updateTask({
+              loadedBytes: receivedBytes,
+              totalBytes: total > 0 ? total : receivedBytes,
+              progress,
+              speed: currentSpeed || undefined,
+            });
+          }
+
+          const zipBlob = new Blob(chunks, { type: 'application/zip' });
+          triggerBrowserDownload(zipBlob, `${file.originalName}.zip`);
+          updateTask({
+            loadedBytes: receivedBytes,
+            totalBytes: receivedBytes,
+            progress: 100,
+            status: 'completed',
+            speed: '',
+          });
+
+          setTimeout(() => {
+            setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+          }, 3500);
           return;
         }
-      } catch (e) {}
+      } catch (e: any) {
+        if (e.name === 'AbortError') {
+          updateTask({ status: 'cancelled' });
+          setTimeout(() => {
+            setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+          }, 1500);
+          return;
+        }
+      }
 
+      // Client-side ZIP fallback
       try {
-        await handleClientFolderZipDownload(file);
+        updateTask({ status: 'compressing', progress: 10 });
+        await handleClientFolderZipDownload(file, (percent) => {
+          updateTask({ progress: Math.max(10, percent), status: 'compressing' });
+        });
+        updateTask({ progress: 100, status: 'completed' });
+        setTimeout(() => {
+          setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+        }, 3500);
       } catch (err: any) {
-        showToast(err.message || 'Error downloading folder archive', 'error');
+        updateTask({ status: 'error', errorMessage: err.message || 'Error creating ZIP' });
       }
       return;
     }
 
-    showToast(`Downloading ${file.originalName}...`, 'success');
+    // Standard File Streaming Download
     const downloadUrl = `/api/files/${file.id}/download`;
     try {
-      const res = await fetch(downloadUrl);
+      const res = await fetch(downloadUrl, { signal: abortController.signal });
       if (res.ok) {
-        const blob = await res.blob();
+        const contentLengthHeader = res.headers.get('content-length');
+        const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : (file.size || 0);
+
+        if (!res.body) {
+          const blob = await res.blob();
+          triggerBrowserDownload(blob, file.originalName);
+          updateTask({
+            loadedBytes: blob.size,
+            totalBytes: total || blob.size,
+            progress: 100,
+            status: 'completed',
+            speed: '',
+          });
+          setTimeout(() => {
+            setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+          }, 3500);
+          return;
+        }
+
+        updateTask({ status: 'downloading' });
+        const reader = res.body.getReader();
+        let receivedBytes = 0;
+        const chunks: Uint8Array[] = [];
+        let lastTime = Date.now();
+        let lastLoaded = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          receivedBytes += value.length;
+
+          const now = Date.now();
+          const timeDiff = (now - lastTime) / 1000;
+          let currentSpeed = '';
+          if (timeDiff >= 0.2) {
+            const bytesPerSec = (receivedBytes - lastLoaded) / timeDiff;
+            currentSpeed = formatSpeed(bytesPerSec);
+            lastTime = now;
+            lastLoaded = receivedBytes;
+          }
+
+          const calcTotal = total > 0 ? total : Math.max(receivedBytes, file.size || 0);
+          const progress = calcTotal > 0 ? Math.min(99, Math.round((receivedBytes / calcTotal) * 100)) : 50;
+
+          updateTask({
+            loadedBytes: receivedBytes,
+            totalBytes: calcTotal,
+            progress,
+            speed: currentSpeed || undefined,
+          });
+        }
+
+        const mimeType = file.mimeType || res.headers.get('content-type') || 'application/octet-stream';
+        const blob = new Blob(chunks, { type: mimeType });
         triggerBrowserDownload(blob, file.originalName);
-        showToast(`Downloaded ${file.originalName}`, 'success');
+
+        updateTask({
+          loadedBytes: receivedBytes,
+          totalBytes: total > 0 ? total : receivedBytes,
+          progress: 100,
+          status: 'completed',
+          speed: '',
+        });
+
+        setTimeout(() => {
+          setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+        }, 3500);
+
       } else {
-        // Physical file missing on server -> Fallback to IndexedDB local blob!
+        // Fallback to IndexedDB local cache
         const localBlob = await idbGetBlob(file.id);
         if (localBlob) {
           triggerBrowserDownload(localBlob, file.originalName);
-          showToast(`Downloaded "${file.originalName}" from local cache. Restoring on server...`, 'success');
+          updateTask({
+            loadedBytes: localBlob.size,
+            totalBytes: localBlob.size,
+            progress: 100,
+            status: 'completed',
+            speed: '',
+          });
           rehydrateSingleFile(file);
+          setTimeout(() => {
+            setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+          }, 3500);
         } else {
-          showToast(`Cannot download "${file.originalName}": file was uploaded before cloud persistence was enabled. Please re-upload it.`, 'error');
+          updateTask({
+            status: 'error',
+            errorMessage: 'File not found on server or local cache',
+          });
         }
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        updateTask({ status: 'cancelled' });
+        setTimeout(() => {
+          setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+        }, 1500);
+        return;
+      }
+
       const localBlob = await idbGetBlob(file.id);
       if (localBlob) {
         triggerBrowserDownload(localBlob, file.originalName);
-        showToast(`Downloaded "${file.originalName}" from local cache`, 'success');
+        updateTask({
+          loadedBytes: localBlob.size,
+          totalBytes: localBlob.size,
+          progress: 100,
+          status: 'completed',
+          speed: '',
+        });
+        setTimeout(() => {
+          setDownloadTasks((prev) => prev.filter((t) => t.id !== taskId));
+        }, 3500);
       } else {
-        showToast(err.message || 'Error downloading file', 'error');
+        updateTask({
+          status: 'error',
+          errorMessage: err.message || 'Error streaming download',
+        });
       }
     }
 
@@ -769,6 +1000,132 @@ export default function App() {
     }
   };
 
+  // Cut & Move Operations Handlers
+  const handleCut = (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+
+    const allowedIds: string[] = [];
+    let blockedCount = 0;
+
+    for (const id of ids) {
+      const file = files.find((f) => f.id === id);
+      if (file) {
+        if (canPerformFileAction('cut', file, currentUser, files, (msg) => showToast(msg, 'error'))) {
+          allowedIds.push(id);
+        } else {
+          blockedCount++;
+        }
+      }
+    }
+
+    if (allowedIds.length === 0) {
+      if (blockedCount > 0) {
+        showToast('Protected: Selected item(s) cannot be cut or moved.', 'error');
+      }
+      return;
+    }
+
+    setCutItemIds(allowedIds);
+    setSelectedIds([]);
+    showToast(
+      `${allowedIds.length} item(s) cut to clipboard. Navigate to your destination folder and click "Paste Here" or use "Choose Folder...".`,
+      'success'
+    );
+  };
+
+  const handleCancelCut = () => {
+    setCutItemIds([]);
+    showToast('Cut cancelled. Clipboard cleared.', 'success');
+  };
+
+  const handlePaste = async (destinationPath?: string) => {
+    if (cutItemIds.length === 0) return;
+    const targetPath = destinationPath !== undefined ? destinationPath : currentFolderPath;
+
+    try {
+      const res = await fetch('/api/files/bulk-move', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'normal',
+          'x-username': currentUser?.username || 'public',
+        },
+        body: JSON.stringify({
+          ids: cutItemIds,
+          destinationFolderPath: targetPath,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to move items');
+
+      // Update local storage and IndexedDB with new records if provided
+      if (Array.isArray(data.updatedFiles) && data.updatedFiles.length > 0) {
+        await idbSaveRecords(data.updatedFiles);
+      }
+
+      setCutItemIds([]);
+      showToast(data.message || `Successfully moved items to /${targetPath || 'Root'}`, 'success');
+      fetchFiles();
+      fetchStats();
+    } catch (err: any) {
+      showToast(err.message || 'Error moving items to destination folder', 'error');
+    }
+  };
+
+  const handleOpenMoveModal = (items: FileRecord[]) => {
+    if (!items || items.length === 0) return;
+
+    const allowedItems = items.filter((file) =>
+      canPerformFileAction('move', file, currentUser, files, (msg) => showToast(msg, 'error'))
+    );
+
+    if (allowedItems.length === 0) {
+      showToast('Protected: Selected item(s) cannot be moved.', 'error');
+      return;
+    }
+
+    setMovingItems(allowedItems);
+  };
+
+  const handleConfirmModalMove = async (targetFolderPath: string) => {
+    if (!movingItems || movingItems.length === 0) return;
+    const idsToMove = movingItems.map((f) => f.id);
+
+    try {
+      const res = await fetch('/api/files/bulk-move', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'normal',
+          'x-username': currentUser?.username || 'public',
+        },
+        body: JSON.stringify({
+          ids: idsToMove,
+          destinationFolderPath: targetFolderPath,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to move items');
+
+      if (Array.isArray(data.updatedFiles) && data.updatedFiles.length > 0) {
+        await idbSaveRecords(data.updatedFiles);
+      }
+
+      // Clear any moved items from cutItemIds or selectedIds
+      setCutItemIds((prev) => prev.filter((id) => !idsToMove.includes(id)));
+      setSelectedIds((prev) => prev.filter((id) => !idsToMove.includes(id)));
+      setMovingItems(null);
+
+      showToast(data.message || `Successfully moved items to /${targetFolderPath || 'Root'}`, 'success');
+      fetchFiles();
+      fetchStats();
+    } catch (err: any) {
+      showToast(err.message || 'Error moving items to destination folder', 'error');
+    }
+  };
+
   const activeWallpaper = wallpaperSettings?.activeWallpaper;
 
   return (
@@ -829,7 +1186,7 @@ export default function App() {
           {/* Toast Alert */}
           {toast && (
             <div
-              className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold animate-in fade-in slide-in-from-bottom-5 duration-200 ${
+              className={`fixed ${downloadTasks.length > 0 ? 'bottom-28' : 'bottom-6'} right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold animate-in fade-in slide-in-from-bottom-5 duration-200 transition-all ${
                 toast.type === 'success'
                   ? 'bg-slate-900 text-white border-slate-700 dark:bg-slate-100 dark:text-slate-900'
                   : 'bg-red-600 text-white border-red-700'
@@ -914,6 +1271,11 @@ export default function App() {
                   setSortOption={setSortOption}
                   selectedIds={selectedIds}
                   setSelectedIds={setSelectedIds}
+                  cutItemIds={cutItemIds}
+                  onCut={handleCut}
+                  onCancelCut={handleCancelCut}
+                  onPaste={handlePaste}
+                  onOpenMoveModal={handleOpenMoveModal}
                   onDownload={handleDownloadFile}
                   onPreview={(f) => setPreviewingFile(f)}
                   onEdit={(f) => setEditingFile(f)}
@@ -951,6 +1313,11 @@ export default function App() {
                 setSortOption={setSortOption}
                 selectedIds={selectedIds}
                 setSelectedIds={setSelectedIds}
+                cutItemIds={cutItemIds}
+                onCut={handleCut}
+                onCancelCut={handleCancelCut}
+                onPaste={handlePaste}
+                onOpenMoveModal={handleOpenMoveModal}
                 onDownload={handleDownloadFile}
                 onPreview={(f) => setPreviewingFile(f)}
                 onEdit={(f) => setEditingFile(f)}
@@ -996,6 +1363,16 @@ export default function App() {
           fetchFiles();
           fetchStats();
         }}
+      />
+
+      <MoveToFolderModal
+        isOpen={!!movingItems}
+        itemsToMove={movingItems || []}
+        allFiles={files}
+        currentUser={currentUser}
+        currentFolderPath={currentFolderPath}
+        onClose={() => setMovingItems(null)}
+        onConfirmMove={handleConfirmModalMove}
       />
 
       <CreateTextModal
@@ -1052,6 +1429,13 @@ export default function App() {
         isOpen={isCurlOpen}
         onClose={() => setIsCurlOpen(false)}
         files={files}
+      />
+
+      {/* Floating Streaming Download Progress Indicator */}
+      <DownloadProgressIndicator
+        tasks={downloadTasks}
+        onCancelTask={handleCancelDownloadTask}
+        onDismissTask={handleDismissDownloadTask}
       />
 
     </div>

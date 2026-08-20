@@ -2,18 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { FileRecord, ViewMode, User } from '../types';
 import { formatBytes, formatDate, getCategoryBadgeColor } from '../utils/formatters';
 import { canPerformFileAction, isFileAdminOnly, isFileAdminProtected } from '../utils/fileGuards';
-import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode, ShieldCheck, Lock, Folder, FolderOpen } from 'lucide-react';
+import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode, ShieldCheck, Lock, Folder, FolderOpen, Scissors, FolderInput } from 'lucide-react';
 import { idbGetBlob } from '../lib/idb';
 
 interface Props {
   file: FileRecord;
   viewMode: ViewMode;
   isSelected: boolean;
+  isCut?: boolean;
   onToggleSelect: (id: string) => void;
   onDownload: (file: FileRecord) => void;
   onPreview: (file: FileRecord) => void;
   onEdit: (file: FileRecord) => void;
   onDelete: (id: string) => void;
+  onCut?: (file: FileRecord) => void;
+  onMove?: (file: FileRecord) => void;
   onQrCode?: (file: FileRecord) => void;
   onOpenFolder?: (folderPath: string) => void;
   currentUser?: User | null;
@@ -25,11 +28,14 @@ export const FileCard: React.FC<Props> = ({
   file,
   viewMode,
   isSelected,
+  isCut = false,
   onToggleSelect,
   onDownload,
   onPreview,
   onEdit,
   onDelete,
+  onCut,
+  onMove,
   onQrCode,
   onOpenFolder,
   currentUser,
@@ -109,6 +115,22 @@ export const FileCard: React.FC<Props> = ({
     onQrCode?.(file);
   };
 
+  const handleCutClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canPerformFileAction('cut', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    onCut?.(file);
+  };
+
+  const handleMoveClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canPerformFileAction('move', file, currentUser, allFiles, notifyBlocked)) {
+      return;
+    }
+    onMove?.(file);
+  };
+
   const handleCheckboxChange = () => {
     if (!canPerformFileAction('select', file, currentUser, allFiles, notifyBlocked)) {
       return;
@@ -163,7 +185,11 @@ export const FileCard: React.FC<Props> = ({
   if (viewMode === 'list') {
     return (
       <div className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-3.5 gap-3 bg-white dark:bg-slate-900 border rounded-xl hover:shadow-md transition-all ${
-        isSelected ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5' : 'border-slate-200 dark:border-slate-800'
+        isCut
+          ? 'border-dashed border-amber-500 bg-amber-500/10 ring-2 ring-amber-400/30 opacity-75'
+          : isSelected
+          ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-500/5'
+          : 'border-slate-200 dark:border-slate-800'
       }`}>
         {/* Left Info Section */}
         <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
@@ -213,6 +239,12 @@ export const FileCard: React.FC<Props> = ({
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border capitalize shrink-0 ${badgeClass}`}>
                 {isFolder ? 'Folder' : file.category}
               </span>
+              {isCut && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0" title="Item cut to clipboard ready to move">
+                  <Scissors className="w-3 h-3" />
+                  <span>Cut</span>
+                </span>
+              )}
               {isAdminUploaded && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
                   <ShieldCheck className="w-3 h-3" />
@@ -248,6 +280,40 @@ export const FileCard: React.FC<Props> = ({
 
         {/* Action Buttons Toolbar */}
         <div className="flex items-center gap-1 shrink-0 justify-end border-t sm:border-t-0 border-slate-100 dark:border-slate-800/80 pt-2 sm:pt-0 w-full sm:w-auto">
+          {onCut && (
+            <button
+              id={`cut-file-${file.id}`}
+              disabled={isProtected || isRestrictedAdminOnly}
+              onClick={handleCutClick}
+              title={isProtected ? "Protected: Administrator items cannot be cut or moved" : "Cut to move"}
+              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
+                isProtected || isRestrictedAdminOnly
+                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                  : isCut
+                  ? 'bg-amber-500 text-white'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+              }`}
+            >
+              <Scissors className="w-4 h-4" />
+            </button>
+          )}
+
+          {onMove && (
+            <button
+              id={`move-file-${file.id}`}
+              disabled={isProtected || isRestrictedAdminOnly}
+              onClick={handleMoveClick}
+              title={isProtected ? "Protected: Administrator items cannot be moved" : "Move to folder..."}
+              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
+                isProtected || isRestrictedAdminOnly
+                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40'
+              }`}
+            >
+              <FolderInput className="w-4 h-4" />
+            </button>
+          )}
+
           {onQrCode && (
             <button
               id={`qr-file-${file.id}`}
@@ -341,7 +407,11 @@ export const FileCard: React.FC<Props> = ({
   // Grid Card Layout
   return (
     <div className={`group relative bg-white dark:bg-slate-900 border rounded-2xl p-4 flex flex-col justify-between hover:shadow-lg transition-all ${
-      isSelected ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-500/5' : 'border-slate-200 dark:border-slate-800'
+      isCut
+        ? 'border-dashed border-amber-500 bg-amber-500/10 ring-2 ring-amber-400/30 opacity-75'
+        : isSelected
+        ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-500/5'
+        : 'border-slate-200 dark:border-slate-800'
     }`}>
       
       {/* Top Bar with Checkbox & Category Badge */}
@@ -357,6 +427,12 @@ export const FileCard: React.FC<Props> = ({
           title={isProtected ? "Protected: Administrator items cannot be selected" : "Select item"}
         />
         <div className="flex items-center gap-1.5">
+          {isCut && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0" title="Item cut to clipboard ready to move">
+              <Scissors className="w-3 h-3" />
+              <span>Cut</span>
+            </span>
+          )}
           {isAdminUploaded && (
             <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
               <ShieldCheck className="w-3 h-3" />
@@ -443,6 +519,38 @@ export const FileCard: React.FC<Props> = ({
         </button>
 
         <div className="flex items-center gap-1">
+          {onCut && (
+            <button
+              id={`grid-cut-${file.id}`}
+              disabled={isProtected || isRestrictedAdminOnly}
+              onClick={handleCutClick}
+              title={isProtected ? "Protected: Administrator items cannot be cut or moved" : "Cut to move"}
+              className={`p-1.5 rounded-md transition-colors ${
+                isProtected || isRestrictedAdminOnly
+                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                  : isCut
+                  ? 'bg-amber-500 text-white'
+                  : 'text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Scissors className="w-4 h-4" />
+            </button>
+          )}
+          {onMove && (
+            <button
+              id={`grid-move-${file.id}`}
+              disabled={isProtected || isRestrictedAdminOnly}
+              onClick={handleMoveClick}
+              title={isProtected ? "Protected: Administrator items cannot be moved" : "Move to folder..."}
+              className={`p-1.5 rounded-md transition-colors ${
+                isProtected || isRestrictedAdminOnly
+                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                  : 'text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <FolderInput className="w-4 h-4" />
+            </button>
+          )}
           {onQrCode && (
             <button
               id={`grid-qr-${file.id}`}

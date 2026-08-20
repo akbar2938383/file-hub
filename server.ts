@@ -214,72 +214,134 @@ function syncSaveSettingsToFirestore(settings: SettingsRecord) {
   }).catch(() => {});
 }
 
-const CHUNK_SIZE = 500 * 1024; // 500 KB per chunk
+const CHUNK_SIZE = 700 * 1024; // 700 KB per chunk (binary) => ~933 KB in Base64 (well within Firestore 1MB doc limit)
 
-async function saveFileChunksToFirestore(fileId: string, filePath: string) {
-  if (isFirestoreQuotaExceeded) return;
+async function saveFileChunksToFirestore(fileId: string, filePath: string): Promise<boolean> {
+  if (isFirestoreQuotaExceeded) return false;
   const db = getDb();
-  if (!db || !fileId || !filePath) return;
-  Promise.resolve().then(async () => {
-    try {
-      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return;
-      const fileBuffer = fs.readFileSync(filePath);
-      const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
+  if (!db || !fileId || !filePath) return false;
 
-      for (let i = 0; i < totalChunks; i++) {
-        if (isFirestoreQuotaExceeded) break;
+  try {
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
+    const fileBuffer = fs.readFileSync(filePath);
+    if (fileBuffer.length === 0) {
+      // Empty file (0 bytes), save empty chunk 0
+      const chunkDocId = `${fileId}_chunk_0`;
+      await setDoc(doc(db, "file_chunks", chunkDocId), {
+        fileId,
+        chunkIndex: 0,
+        totalChunks: 1,
+        data: "",
+        byteLength: 0,
+        createdAt: new Date().toISOString()
+      }, { merge: true });
+      return true;
+    }
+
+    const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
+    
+    // Concurrency limit for parallel writes
+    const CHUNK_CONCURRENCY = 6;
+    for (let batchStart = 0; batchStart < totalChunks; batchStart += CHUNK_CONCURRENCY) {
+      if (isFirestoreQuotaExceeded) break;
+      const batchPromises: Promise<void>[] = [];
+      const batchEnd = Math.min(batchStart + CHUNK_CONCURRENCY, totalChunks);
+      
+      for (let i = batchStart; i < batchEnd; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, fileBuffer.length);
         const chunkBuffer = fileBuffer.subarray(start, end);
         const base64Data = chunkBuffer.toString("base64");
-
         const chunkDocId = `${fileId}_chunk_${i}`;
-        try {
-          await setDoc(doc(db, "file_chunks", chunkDocId), {
-            fileId,
-            chunkIndex: i,
-            totalChunks,
-            data: base64Data,
-            createdAt: new Date().toISOString()
-          }, { merge: true });
-        } catch (writeErr: any) {
+
+        const writePromise = setDoc(doc(db, "file_chunks", chunkDocId), {
+          fileId,
+          chunkIndex: i,
+          totalChunks,
+          byteLength: chunkBuffer.length,
+          data: base64Data,
+          createdAt: new Date().toISOString()
+        }, { merge: true }).catch((writeErr: any) => {
           if (handleFirestoreQuotaError(writeErr, "binary chunk write")) {
-            break;
+            throw writeErr;
           } else {
-            console.warn(`Firestore binary chunk write error:`, writeErr?.message || writeErr);
+            console.warn(`Firestore binary chunk write error (${chunkDocId}):`, writeErr?.message || writeErr);
           }
-        }
+        });
+        batchPromises.push(writePromise);
       }
-    } catch (err: any) {
-      if (!handleFirestoreQuotaError(err, "binary chunk save")) {
-        console.warn(`Error saving binary chunks to Firestore for file ${fileId}:`, err?.message || err);
-      }
+
+      await Promise.all(batchPromises);
     }
-  }).catch(() => {});
+    console.log(`[Cloud Persistence] Successfully saved ${totalChunks} binary chunk(s) for file ${fileId} (${fileBuffer.length} bytes) to Firestore`);
+    return true;
+  } catch (err: any) {
+    if (!handleFirestoreQuotaError(err, "binary chunk save")) {
+      console.warn(`Error saving binary chunks to Firestore for file ${fileId}:`, err?.message || err);
+    }
+    return false;
+  }
 }
 
 async function ensureFileOnDiskFromFirestore(fileId: string, filePath: string): Promise<boolean> {
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+  // If file already exists on disk and has content, we're ready
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile() && fs.statSync(filePath).size > 0) {
     return true;
   }
   const db = getDb();
   if (!db || !fileId) return false;
 
   try {
-    console.log(`File missing on disk (${filePath}). Attempting to restore from Firestore binary chunks...`);
-    const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      console.warn(`No binary chunks found in Firestore for fileId: ${fileId}`);
+    console.log(`[Cloud Persistence] File missing or empty on disk (${filePath}). Restoring from Firestore binary chunks for fileId: ${fileId}...`);
+    
+    // Strategy 1: Direct Doc lookup by ID for chunk 0 (fastest, no query index required)
+    const chunk0Ref = doc(db, "file_chunks", `${fileId}_chunk_0`);
+    const chunk0Snap = await getDoc(chunk0Ref);
+
+    let chunks: { chunkIndex: number; totalChunks: number; data: string }[] = [];
+
+    if (chunk0Snap.exists()) {
+      const c0Data = chunk0Snap.data();
+      const totalChunks = c0Data.totalChunks || 1;
+      chunks.push({ chunkIndex: 0, totalChunks, data: c0Data.data || "" });
+
+      if (totalChunks > 1) {
+        const remainingDocPromises: Promise<any>[] = [];
+        for (let i = 1; i < totalChunks; i++) {
+          const cRef = doc(db, "file_chunks", `${fileId}_chunk_${i}`);
+          remainingDocPromises.push(getDoc(cRef));
+        }
+        const remainingSnaps = await Promise.all(remainingDocPromises);
+        for (let i = 0; i < remainingSnaps.length; i++) {
+          const s = remainingSnaps[i];
+          if (s.exists()) {
+            const d = s.data();
+            chunks.push({ chunkIndex: d.chunkIndex ?? (i + 1), totalChunks, data: d.data || "" });
+          }
+        }
+      }
+    }
+
+    // Strategy 2: If direct ID lookup didn't retrieve all chunks, fallback to querying collection
+    if (chunks.length === 0 || (chunks[0].totalChunks > 1 && chunks.length < chunks[0].totalChunks)) {
+      console.log(`[Cloud Persistence] Direct chunk lookup had ${chunks.length} chunks. Falling back to query...`);
+      const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        chunks = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          chunks.push({ chunkIndex: d.chunkIndex ?? 0, totalChunks: d.totalChunks || snap.size, data: d.data || "" });
+        });
+      }
+    }
+
+    if (chunks.length === 0) {
+      console.warn(`[Cloud Persistence] No binary chunks found in Firestore for fileId: ${fileId}`);
       return false;
     }
 
-    const chunks: { chunkIndex: number; data: string }[] = [];
-    snap.forEach((docSnap) => {
-      const d = docSnap.data();
-      chunks.push({ chunkIndex: d.chunkIndex, data: d.data });
-    });
-
+    // Sort chunks in ascending order
     chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
 
     const buffers = chunks.map((c) => Buffer.from(c.data, "base64"));
@@ -291,10 +353,10 @@ async function ensureFileOnDiskFromFirestore(fileId: string, filePath: string): 
     }
 
     fs.writeFileSync(filePath, combinedBuffer);
-    console.log(`Successfully restored file from Firestore binary chunks to disk: ${filePath} (${combinedBuffer.length} bytes)`);
+    console.log(`[Cloud Persistence] Successfully restored file from Firestore to disk: ${filePath} (${combinedBuffer.length} bytes, ${chunks.length} chunk(s))`);
     return true;
   } catch (err) {
-    console.error(`Error restoring file from Firestore binary chunks for file ${fileId}:`, err);
+    console.error(`[Cloud Persistence] Error restoring file from Firestore binary chunks for file ${fileId}:`, err);
     return false;
   }
 }
@@ -302,17 +364,17 @@ async function ensureFileOnDiskFromFirestore(fileId: string, filePath: string): 
 async function deleteFileChunksFromFirestore(fileId: string) {
   const db = getDb();
   if (!db || !fileId) return;
-  Promise.resolve().then(async () => {
-    try {
-      const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
-      const snap = await getDocs(q);
-      snap.forEach((docSnap) => {
-        deleteDoc(docSnap.ref).catch(() => {});
-      });
-    } catch (err) {
-      console.error(`Error deleting binary chunks from Firestore for file ${fileId}:`, err);
-    }
-  });
+  try {
+    const q = query(collection(db, "file_chunks"), where("fileId", "==", fileId));
+    const snap = await getDocs(q);
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach((docSnap) => {
+      deletePromises.push(deleteDoc(docSnap.ref).catch(() => {}));
+    });
+    await Promise.all(deletePromises);
+  } catch (err) {
+    console.error(`Error deleting binary chunks from Firestore for file ${fileId}:`, err);
+  }
 }
 
 async function syncFromFirestore() {
@@ -366,10 +428,17 @@ async function syncFromFirestore() {
         console.log(`Synced ${localRecords.length} file records from Firestore.`);
       }
 
-      // Pre-warm restoration of binary files onto disk
+      // Pre-warm and two-way sync binary files
       for (const rr of localRecords) {
         if (!rr.isFolder && rr.filename) {
-          ensureFileOnDiskFromFirestore(rr.id, path.join(UPLOADS_DIR, rr.filename)).catch(() => {});
+          const filePath = path.join(UPLOADS_DIR, rr.filename);
+          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            // Backup to Firestore if not already saved
+            saveFileChunksToFirestore(rr.id, filePath).catch(() => {});
+          } else {
+            // Restore from Firestore to disk
+            ensureFileOnDiskFromFirestore(rr.id, filePath).catch(() => {});
+          }
         }
       }
     } else {
@@ -381,6 +450,14 @@ async function syncFromFirestore() {
           localRecords = localRecords.filter((r) => !deletedIds.has(r.id));
           if (localRecords.length > 0) {
             syncSaveMetadataToFirestore(localRecords);
+            for (const rr of localRecords) {
+              if (!rr.isFolder && rr.filename) {
+                const filePath = path.join(UPLOADS_DIR, rr.filename);
+                if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+                  saveFileChunksToFirestore(rr.id, filePath).catch(() => {});
+                }
+              }
+            }
           }
         }
       } catch (e) {}
@@ -1029,7 +1106,7 @@ app.put("/api/users/:id", (req, res) => {
 });
 
 // Update User Profile Picture / Avatar via File Upload
-app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
+app.post("/api/users/:id/avatar", upload.single("avatar"), async (req, res) => {
   const { id } = req.params;
   const file = req.file;
 
@@ -1070,7 +1147,7 @@ app.post("/api/users/:id/avatar", upload.single("avatar"), (req, res) => {
 
   const existingRecords = getMetadata();
   saveMetadata([record, ...existingRecords]);
-  saveFileChunksToFirestore(recordId, path.join(UPLOADS_DIR, file.filename));
+  await saveFileChunksToFirestore(recordId, path.join(UPLOADS_DIR, file.filename));
 
   saveUsers(users);
   const { password: _, ...safeUser } = users[index];
@@ -1170,7 +1247,7 @@ app.post("/api/wallpaper", (req, res) => {
 });
 
 // Upload custom image as active wallpaper
-app.post("/api/wallpaper/upload", upload.single("wallpaper"), (req, res) => {
+app.post("/api/wallpaper/upload", upload.single("wallpaper"), async (req, res) => {
   const file = req.file;
   if (!file) {
     return res.status(400).json({ error: "No wallpaper image provided" });
@@ -1193,7 +1270,7 @@ app.post("/api/wallpaper/upload", upload.single("wallpaper"), (req, res) => {
   // Save to metadata as well so it appears in file manager
   const files = getMetadata();
   saveMetadata([fileRecord, ...files]);
-  saveFileChunksToFirestore(fileRecord.id, path.join(UPLOADS_DIR, file.filename));
+  await saveFileChunksToFirestore(fileRecord.id, path.join(UPLOADS_DIR, file.filename));
 
   const wallpaperUrl = `/api/files/${fileRecord.id}/view`;
   const settings = getSettings();
@@ -1299,7 +1376,7 @@ app.post("/api/files/sync", (req, res) => {
 });
 
 // Rehydrate missing binary file from client IndexedDB backup
-app.post("/api/files/rehydrate", upload.single("file"), (req, res) => {
+app.post("/api/files/rehydrate", upload.single("file"), async (req, res) => {
   const file = req.file;
   const {
     id,
@@ -1387,7 +1464,7 @@ app.post("/api/files/rehydrate", upload.single("file"), (req, res) => {
   saveMetadata(finalRecords);
 
   if (targetFilename) {
-    saveFileChunksToFirestore(id, path.join(UPLOADS_DIR, targetFilename));
+    await saveFileChunksToFirestore(id, path.join(UPLOADS_DIR, targetFilename));
   }
 
   res.status(200).json({ message: "File rehydrated successfully", file: record });
@@ -1679,7 +1756,7 @@ app.post("/api/folders/create", (req, res) => {
 });
 
 // 3. Upload File(s) or Folder(s)
-app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
+app.post("/api/files/upload", upload.array("files", 200), async (req, res) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: "No files uploaded" });
@@ -1704,6 +1781,7 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
   const existingRecords = getMetadata();
   const newRecords: FileRecord[] = [];
   const newlyCreatedFolders: FileRecord[] = [];
+  const uploadSavePromises: Promise<boolean>[] = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -1739,11 +1817,14 @@ app.post("/api/files/upload", upload.array("files", 200), (req, res) => {
       relativePath: relPath,
     };
     newRecords.push(record);
-    saveFileChunksToFirestore(record.id, path.join(UPLOADS_DIR, file.filename));
+    uploadSavePromises.push(saveFileChunksToFirestore(record.id, path.join(UPLOADS_DIR, file.filename)));
   }
 
   const updatedRecords = [...newRecords, ...newlyCreatedFolders, ...existingRecords];
   saveMetadata(updatedRecords);
+
+  // Await cloud chunk persistence so files are immediately ready across devices
+  await Promise.all(uploadSavePromises);
 
   res.status(201).json({
     message: `${newRecords.length} file(s) uploaded successfully`,
@@ -1783,7 +1864,7 @@ app.post("/api/files/upload-chunk", upload.single("chunk"), (req, res) => {
 });
 
 // 3c. Complete Chunked Upload
-app.post("/api/files/upload-complete", (req, res) => {
+app.post("/api/files/upload-complete", async (req, res) => {
   try {
     const {
       uploadId,
@@ -1876,7 +1957,7 @@ app.post("/api/files/upload-complete", (req, res) => {
 
     const updatedRecords = [record, ...createdFolders, ...existingRecords];
     saveMetadata(updatedRecords);
-    saveFileChunksToFirestore(record.id, finalFilePath);
+    await saveFileChunksToFirestore(record.id, finalFilePath);
 
     res.status(201).json({
       message: "File upload completed successfully",
@@ -1890,7 +1971,7 @@ app.post("/api/files/upload-complete", (req, res) => {
 });
 
 // 4. Create Direct Text Note / Snippet file
-app.post("/api/files/create-text", (req, res) => {
+app.post("/api/files/create-text", async (req, res) => {
   const { title, content, extension = "txt", description = "", folderPath = "" } = req.body;
   if (!title || typeof content !== "string") {
     return res.status(400).json({ error: "Title and content are required" });
@@ -1927,7 +2008,7 @@ app.post("/api/files/create-text", (req, res) => {
 
   const existingRecords = getMetadata();
   saveMetadata([record, ...existingRecords]);
-  saveFileChunksToFirestore(record.id, filePath);
+  await saveFileChunksToFirestore(record.id, filePath);
 
   res.status(201).json({ message: "File created successfully", file: record });
 });
@@ -2421,6 +2502,230 @@ app.post("/api/files/bulk-delete", (req, res) => {
   res.json({
     message: `${deleteArray.length} item(s) deleted successfully`,
     deletedIds: deleteArray,
+  });
+});
+
+// 10b. Move File(s) or Folder(s) to a Target Directory / Folder
+app.post("/api/files/bulk-move", (req, res) => {
+  const { ids, destinationFolderPath = "" } = req.body;
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "No item IDs provided to move" });
+  }
+
+  const cleanDest = (typeof destinationFolderPath === "string" ? destinationFolderPath : "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "");
+
+  let records = getMetadata();
+
+  // If destination is not root, verify destination folder exists
+  if (cleanDest !== "") {
+    const destFolderExists = records.some((r) => {
+      if (!r.isFolder && r.category !== "folder") return false;
+      const fullPath = (r.folderPath ? `${r.folderPath}/${r.originalName}` : r.originalName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+      return fullPath.toLowerCase() === cleanDest.toLowerCase();
+    });
+
+    if (!destFolderExists) {
+      return res.status(404).json({ error: `Destination folder "${cleanDest}" does not exist` });
+    }
+
+    // Verify requester permission if destination folder is admin-only
+    if (requesterRole !== "administrator") {
+      const destFolderRecord = records.find((r) => {
+        if (!r.isFolder && r.category !== "folder") return false;
+        const fullPath = (r.folderPath ? `${r.folderPath}/${r.originalName}` : r.originalName)
+          .replace(/\\/g, "/")
+          .replace(/^\/+|\/+$/g, "");
+        return fullPath.toLowerCase() === cleanDest.toLowerCase();
+      });
+
+      if (destFolderRecord && isRecordAdminOnly(destFolderRecord, records)) {
+        return res.status(403).json({ error: "Access denied. Cannot move files into an Admin-Only folder." });
+      }
+    }
+  }
+
+  // Find requested items
+  const itemsToMove = records.filter((r) => ids.includes(r.id));
+  if (itemsToMove.length === 0) {
+    return res.status(404).json({ error: "No valid items found to move" });
+  }
+
+  // Permission filter: Non-administrators cannot move protected items
+  let allowedItems = itemsToMove;
+  if (requesterRole !== "administrator") {
+    allowedItems = itemsToMove.filter((r) => !isRecordAdminProtected(r, records));
+    if (allowedItems.length === 0) {
+      return res.status(403).json({ error: "Access denied. Selected items are protected by administrator and cannot be moved." });
+    }
+  }
+
+  // Check circular move errors (e.g. moving a folder into itself or its descendants)
+  for (const item of allowedItems) {
+    if (item.isFolder || item.category === "folder") {
+      const itemParent = (item.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      const itemFullPath = (itemParent ? `${itemParent}/${item.originalName}` : item.originalName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+
+      if (cleanDest.toLowerCase() === itemFullPath.toLowerCase() || cleanDest.toLowerCase().startsWith(`${itemFullPath.toLowerCase()}/`)) {
+        return res.status(400).json({
+          error: `Cannot move folder "${item.originalName}" into itself or into its own subfolder.`
+        });
+      }
+    }
+  }
+
+  // Set of moving item IDs
+  const movingIds = new Set(allowedItems.map((r) => r.id));
+
+  // Update records
+  for (const item of allowedItems) {
+    const oldParentPath = (item.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+
+    // If item is already at the destination, no folder structure changes needed for it
+    if (oldParentPath.toLowerCase() === cleanDest.toLowerCase()) {
+      continue;
+    }
+
+    if (item.isFolder || item.category === "folder") {
+      const oldFullPath = (oldParentPath ? `${oldParentPath}/${item.originalName}` : item.originalName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+
+      const newFullPath = (cleanDest ? `${cleanDest}/${item.originalName}` : item.originalName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+
+      // Update the folder record itself
+      const idx = records.findIndex((r) => r.id === item.id);
+      if (idx !== -1) {
+        records[idx].folderPath = cleanDest;
+      }
+
+      // Recursively update all descendant files and subfolders
+      for (let i = 0; i < records.length; i++) {
+        if (records[i].id === item.id) continue;
+        const rFolderPath = (records[i].folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+        if (rFolderPath.toLowerCase() === oldFullPath.toLowerCase() || rFolderPath.toLowerCase().startsWith(`${oldFullPath.toLowerCase()}/`)) {
+          const suffix = rFolderPath.slice(oldFullPath.length); // e.g. "" or "/sub"
+          const updatedFolderPath = `${newFullPath}${suffix}`.replace(/^\/+/, "");
+          records[i].folderPath = updatedFolderPath;
+          if (records[i].relativePath) {
+            records[i].relativePath = `${updatedFolderPath}/${records[i].originalName}`;
+          }
+        }
+      }
+    } else {
+      // Regular file
+      const idx = records.findIndex((r) => r.id === item.id);
+      if (idx !== -1) {
+        records[idx].folderPath = cleanDest;
+        records[idx].relativePath = cleanDest ? `${cleanDest}/${records[idx].originalName}` : records[idx].originalName;
+      }
+    }
+  }
+
+  saveMetadata(records);
+
+  res.json({
+    message: `Successfully moved ${allowedItems.length} item(s) to ${cleanDest ? `/${cleanDest}` : "Root Vault"}`,
+    movedCount: allowedItems.length,
+    movedIds: Array.from(movingIds),
+    destinationFolderPath: cleanDest,
+    files: records,
+  });
+});
+
+// 10c. Bulk Rename File(s) and Folder(s)
+app.post("/api/files/bulk-rename", (req, res) => {
+  const { items } = req.body;
+  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "No rename items provided" });
+  }
+
+  let records = getMetadata();
+  const updatedIds: string[] = [];
+
+  // 1. Verify permissions
+  for (const item of items) {
+    if (!item.id || !item.newName) continue;
+    const rec = records.find((r) => r.id === item.id);
+    if (!rec) continue;
+
+    if (requesterRole !== "administrator" && isRecordAdminProtected(rec, records)) {
+      return res.status(403).json({
+        error: `Access denied. Item "${rec.originalName}" is administrator-protected and cannot be renamed.`
+      });
+    }
+  }
+
+  // 2. Perform renames
+  for (const item of items) {
+    if (!item.id || typeof item.newName !== "string") continue;
+    const cleanName = item.newName.trim().replace(/[\/\\]/g, "");
+    if (!cleanName) continue;
+
+    const idx = records.findIndex((r) => r.id === item.id);
+    if (idx === -1) continue;
+
+    const currentRecord = records[idx];
+    const oldName = currentRecord.originalName;
+    if (oldName === cleanName) continue;
+
+    if (currentRecord.isFolder || currentRecord.category === "folder") {
+      const folderParent = (currentRecord.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      const oldFullPath = (folderParent ? `${folderParent}/${oldName}` : oldName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+      const newFullPath = (folderParent ? `${folderParent}/${cleanName}` : cleanName)
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+
+      // Update the folder record itself
+      records[idx].originalName = cleanName;
+
+      // Update all descendants
+      for (let i = 0; i < records.length; i++) {
+        if (records[i].id === currentRecord.id) continue;
+        const rFolderPath = (records[i].folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+        if (rFolderPath.toLowerCase() === oldFullPath.toLowerCase() || rFolderPath.toLowerCase().startsWith(`${oldFullPath.toLowerCase()}/`)) {
+          const suffix = rFolderPath.slice(oldFullPath.length);
+          const updatedFolderPath = `${newFullPath}${suffix}`.replace(/^\/+/, "");
+          records[i].folderPath = updatedFolderPath;
+          if (records[i].relativePath) {
+            records[i].relativePath = `${updatedFolderPath}/${records[i].originalName}`;
+          }
+        }
+      }
+    } else {
+      // Regular file
+      records[idx].originalName = cleanName;
+      records[idx].category = detectCategory(records[idx].mimeType, cleanName);
+      if (records[idx].folderPath) {
+        records[idx].relativePath = `${records[idx].folderPath}/${cleanName}`;
+      } else {
+        records[idx].relativePath = cleanName;
+      }
+    }
+
+    updatedIds.push(currentRecord.id);
+  }
+
+  saveMetadata(records);
+
+  res.json({
+    message: `Successfully renamed ${updatedIds.length} item(s)`,
+    renamedCount: updatedIds.length,
+    renamedIds: updatedIds,
+    files: records,
   });
 });
 

@@ -8,7 +8,9 @@ export type FileInteractionAction =
   | 'share'
   | 'select'
   | 'open'
-  | 'qr';
+  | 'qr'
+  | 'cut'
+  | 'move';
 
 export interface GuardCheckResult {
   allowed: boolean;
@@ -138,6 +140,12 @@ export function checkFileActionPermission(
           allowed: false,
           reason: 'Access restricted: Admin Only files cannot generate public QR codes.',
         };
+      case 'cut':
+      case 'move':
+        return {
+          allowed: false,
+          reason: 'Access restricted: Admin Only files cannot be moved by members.',
+        };
       default:
         return {
           allowed: false,
@@ -164,6 +172,12 @@ export function checkFileActionPermission(
       return {
         allowed: false,
         reason: 'Protected: Administrator files cannot be selected for deletion or modification.',
+      };
+    }
+    if (action === 'cut' || action === 'move') {
+      return {
+        allowed: false,
+        reason: 'Protected: Administrator files cannot be moved or cut by members.',
       };
     }
   }

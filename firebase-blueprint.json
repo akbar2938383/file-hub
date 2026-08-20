@@ -21,6 +21,26 @@
         "relativePath": { "type": "string", "description": "Full relative path" }
       }
     },
+    "file_chunks": {
+      "title": "File Binary Chunks",
+      "description": "Binary payload chunks stored in base64 format for cross-device cloud persistence",
+      "fields": {
+        "fileId": { "type": "string", "description": "Associated File Record ID" },
+        "chunkIndex": { "type": "number", "description": "0-based index of this chunk" },
+        "totalChunks": { "type": "number", "description": "Total number of chunks for the file" },
+        "byteLength": { "type": "number", "description": "Byte length of the raw chunk" },
+        "data": { "type": "string", "description": "Base64-encoded binary chunk payload" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      }
+    },
+    "settings": {
+      "title": "System Settings",
+      "description": "Application settings and wallpaper preferences",
+      "fields": {
+        "activeWallpaper": { "type": "object", "description": "Current wallpaper configuration" },
+        "presets": { "type": "array", "items": { "type": "object" }, "description": "Saved wallpaper presets" }
+      }
+    },
     "users": {
       "title": "User Accounts",
       "description": "Registered system user accounts",

@@ -22,6 +22,14 @@ export function formatDate(isoString: string): string {
   }
 }
 
+export function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec <= 0 || !isFinite(bytesPerSec)) return '0 KB/s';
+  if (bytesPerSec < 1024 * 1024) {
+    return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  }
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(2)} MB/s`;
+}
+
 export function getCategoryBadgeColor(category: string): string {
   switch (category) {
     case 'image':

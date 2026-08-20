@@ -370,52 +370,6 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
         </div>
       </div>
 
-      {/* Access Permission Matrix */}
-      <div className="p-6 rounded-3xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-xl backdrop-blur-md">
-        <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 mb-4">
-          Role Access Control Matrix
-        </h3>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
-                <th className="py-3 px-4">Feature Capabilities</th>
-                <th className="py-3 px-4 text-center">Administrator</th>
-                <th className="py-3 px-4 text-center">Normal User</th>
-                <th className="py-3 px-4 text-center">Public Guest</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-              <tr>
-                <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
-                  Global Live Wallpaper Changer
-                </td>
-                <td className="py-3 px-4 text-center text-emerald-500 font-bold">✓ Full Broadcast</td>
-                <td className="py-3 px-4 text-center text-slate-400">View Only</td>
-                <td className="py-3 px-4 text-center text-slate-400">View Only</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
-                  User Account Control & Role Assignment
-                </td>
-                <td className="py-3 px-4 text-center text-emerald-500 font-bold">✓ Full Control</td>
-                <td className="py-3 px-4 text-center text-red-400">✗ No Access</td>
-                <td className="py-3 px-4 text-center text-red-400">✗ No Access</td>
-              </tr>
-              <tr>
-                <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
-                  Upload Custom Files & Create Text Code
-                </td>
-                <td className="py-3 px-4 text-center text-emerald-500 font-bold">✓ Allowed</td>
-                <td className="py-3 px-4 text-center text-emerald-500 font-bold">✓ Allowed</td>
-                <td className="py-3 px-4 text-center text-slate-400">Download Only</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* Add User Modal */}
       {isAddUserOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">

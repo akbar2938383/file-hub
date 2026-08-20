@@ -76,3 +76,18 @@ export interface WallpaperSettings {
 
 export type ActivePage = 'files' | 'wallpaper' | 'users' | 'login';
 
+export interface DownloadTask {
+  id: string;
+  fileId: string;
+  fileName: string;
+  category?: string;
+  loadedBytes: number;
+  totalBytes: number;
+  progress: number;
+  speed?: string;
+  status: 'starting' | 'downloading' | 'compressing' | 'completed' | 'error' | 'cancelled';
+  errorMessage?: string;
+  startTime: number;
+  abortController?: AbortController;
+}
+
