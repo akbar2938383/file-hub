@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileRecord, ViewMode, User } from '../types';
 import { formatBytes, formatDate, getCategoryBadgeColor } from '../utils/formatters';
-import { canPerformFileAction, isFileAdminOnly, isFileAdminProtected } from '../utils/fileGuards';
+import { canPerformFileAction, isFileAdminProtected } from '../utils/fileGuards';
 import { Download, Eye, Edit3, Trash2, Share2, Check, FileText, Image, Film, Music, Archive, Code, File, QrCode, ShieldCheck, Lock, Folder, FolderOpen, Scissors, FolderInput } from 'lucide-react';
 import { idbGetBlob } from '../lib/idb';
 
@@ -46,9 +46,7 @@ export const FileCard: React.FC<Props> = ({
 
   const isAdminUploaded = file.uploadedByRole === 'administrator';
   const isUserAdmin = currentUser?.role === 'administrator';
-  const isAdminOnlyFlag = isFileAdminOnly(file, allFiles);
   const isProtected = isFileAdminProtected(file, allFiles) && !isUserAdmin;
-  const isRestrictedAdminOnly = isAdminOnlyFlag && !isUserAdmin;
 
   const isFolder = file.isFolder === true || file.category === 'folder';
   const folderTargetPath = file.folderPath ? `${file.folderPath}/${file.originalName}` : file.originalName;
@@ -212,7 +210,7 @@ export const FileCard: React.FC<Props> = ({
           >
             {isFolder ? (
               <FolderOpen className="w-5 h-5 text-amber-500 dark:text-amber-400" />
-            ) : file.category === 'image' && !isRestrictedAdminOnly ? (
+            ) : file.category === 'image' ? (
               <img
                 src={imgSrc}
                 alt={file.originalName}
@@ -229,11 +227,7 @@ export const FileCard: React.FC<Props> = ({
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span
                 onClick={handleCardClick}
-                className={`font-medium text-xs sm:text-sm truncate max-w-[180px] sm:max-w-xs ${
-                  isRestrictedAdminOnly
-                    ? 'text-slate-500 dark:text-slate-400 cursor-not-allowed'
-                    : 'text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer'
-                }`}
+                className="font-medium text-xs sm:text-sm truncate max-w-[180px] sm:max-w-xs text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
                 title={file.originalName}
               >
                 {file.originalName}
@@ -251,12 +245,6 @@ export const FileCard: React.FC<Props> = ({
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0" title="Uploaded by Administrator">
                   <ShieldCheck className="w-3 h-3" />
                   <span>Admin</span>
-                </span>
-              )}
-              {file.isAdminOnly && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1 shrink-0" title="Restricted to Administrators only">
-                  <Lock className="w-3 h-3 text-rose-500" />
-                  <span>Admin Only</span>
                 </span>
               )}
             </div>
@@ -285,11 +273,11 @@ export const FileCard: React.FC<Props> = ({
           {onCut && (
             <button
               id={`cut-file-${file.id}`}
-              disabled={isProtected || isRestrictedAdminOnly}
+              disabled={isProtected}
               onClick={handleCutClick}
               title={isProtected ? "Protected: Administrator items cannot be cut or moved" : "Cut to move"}
               className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-                isProtected || isRestrictedAdminOnly
+                isProtected
                   ? 'opacity-30 cursor-not-allowed text-slate-400'
                   : isCut
                   ? 'bg-amber-500 text-white'
@@ -303,11 +291,11 @@ export const FileCard: React.FC<Props> = ({
           {onMove && (
             <button
               id={`move-file-${file.id}`}
-              disabled={isProtected || isRestrictedAdminOnly}
+              disabled={isProtected}
               onClick={handleMoveClick}
               title={isProtected ? "Protected: Administrator items cannot be moved" : "Move to folder..."}
               className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-                isProtected || isRestrictedAdminOnly
+                isProtected
                   ? 'opacity-30 cursor-not-allowed text-slate-400'
                   : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40'
               }`}
@@ -319,14 +307,9 @@ export const FileCard: React.FC<Props> = ({
           {onQrCode && (
             <button
               id={`qr-file-${file.id}`}
-              disabled={isRestrictedAdminOnly}
               onClick={handleQrClick}
-              title={isRestrictedAdminOnly ? "Restricted to Administrators" : "Mobile QR Code"}
-              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-                isRestrictedAdminOnly
-                  ? 'opacity-30 cursor-not-allowed text-slate-400'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-              }`}
+              title="Mobile QR Code"
+              className="p-1.5 sm:p-2 rounded-lg transition-colors text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
             >
               <QrCode className="w-4 h-4" />
             </button>
@@ -334,42 +317,27 @@ export const FileCard: React.FC<Props> = ({
 
           <button
             id={`download-file-${file.id}`}
-            disabled={isRestrictedAdminOnly}
             onClick={handleDownloadClick}
-            title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Download file"}
-            className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-              isRestrictedAdminOnly
-                ? 'opacity-30 cursor-not-allowed text-slate-400'
-                : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-            }`}
+            title="Download file"
+            className="p-1.5 sm:p-2 rounded-lg transition-colors text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
           >
             <Download className="w-4 h-4" />
           </button>
 
           <button
             id={`preview-file-${file.id}`}
-            disabled={isRestrictedAdminOnly}
             onClick={handlePreviewClick}
-            title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Preview file"}
-            className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-              isRestrictedAdminOnly
-                ? 'opacity-30 cursor-not-allowed text-slate-400'
-                : 'text-slate-600 dark:text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
-            }`}
+            title="Preview file"
+            className="p-1.5 sm:p-2 rounded-lg transition-colors text-slate-600 dark:text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
           >
             <Eye className="w-4 h-4" />
           </button>
 
           <button
             id={`share-file-${file.id}`}
-            disabled={isRestrictedAdminOnly}
             onClick={copyShareLink}
-            title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Copy download link"}
-            className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-              isRestrictedAdminOnly
-                ? 'opacity-30 cursor-not-allowed text-slate-400'
-                : 'text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-            }`}
+            title="Copy download link"
+            className="p-1.5 sm:p-2 rounded-lg transition-colors text-slate-600 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
           </button>
@@ -441,12 +409,6 @@ export const FileCard: React.FC<Props> = ({
               <span>Admin</span>
             </span>
           )}
-          {file.isAdminOnly && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1 shrink-0" title="Restricted to Administrators only">
-              <Lock className="w-3 h-3 text-rose-500" />
-              <span>Admin Only</span>
-            </span>
-          )}
           <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-semibold border capitalize ${badgeClass}`}>
             {isFolder ? 'Folder' : file.category}
           </span>
@@ -461,11 +423,9 @@ export const FileCard: React.FC<Props> = ({
         {isFolder ? (
           <div className="p-4 bg-amber-500/10 text-amber-500 rounded-2xl flex flex-col items-center justify-center gap-1">
             <FolderOpen className="w-10 h-10" />
-            <span className="text-[11px] font-bold">
-              {isRestrictedAdminOnly ? 'Admin Only Folder' : 'Open Folder'}
-            </span>
+            <span className="text-[11px] font-bold">Open Folder</span>
           </div>
-        ) : file.category === 'image' && !isRestrictedAdminOnly ? (
+        ) : file.category === 'image' ? (
           <img
             src={imgSrc}
             alt={file.originalName}
@@ -476,11 +436,6 @@ export const FileCard: React.FC<Props> = ({
         ) : (
           <div className="p-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl flex flex-col items-center justify-center gap-1">
             <IconComponent className="w-8 h-8" />
-            {isRestrictedAdminOnly && (
-              <span className="text-[10px] font-semibold text-rose-500 flex items-center gap-1">
-                <Lock className="w-3 h-3" /> Admin Only
-              </span>
-            )}
           </div>
         )}
       </div>
@@ -489,11 +444,7 @@ export const FileCard: React.FC<Props> = ({
       <div className="mb-3">
         <h4
           onClick={handleCardClick}
-          className={`font-semibold text-sm truncate mb-1 ${
-            isRestrictedAdminOnly
-              ? 'text-slate-500 dark:text-slate-400 cursor-not-allowed'
-              : 'text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer'
-          }`}
+          className="font-semibold text-sm truncate mb-1 text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
           title={file.originalName}
         >
           {file.originalName}
@@ -508,13 +459,8 @@ export const FileCard: React.FC<Props> = ({
       <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
         <button
           id={`grid-download-${file.id}`}
-          disabled={isRestrictedAdminOnly}
           onClick={handleDownloadClick}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm transition-colors ${
-            isRestrictedAdminOnly
-              ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm transition-colors bg-blue-600 hover:bg-blue-700 text-white"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Download</span>
@@ -524,11 +470,11 @@ export const FileCard: React.FC<Props> = ({
           {onCut && (
             <button
               id={`grid-cut-${file.id}`}
-              disabled={isProtected || isRestrictedAdminOnly}
+              disabled={isProtected}
               onClick={handleCutClick}
               title={isProtected ? "Protected: Administrator items cannot be cut or moved" : "Cut to move"}
               className={`p-1.5 rounded-md transition-colors ${
-                isProtected || isRestrictedAdminOnly
+                isProtected
                   ? 'opacity-30 cursor-not-allowed text-slate-400'
                   : isCut
                   ? 'bg-amber-500 text-white'
@@ -541,11 +487,11 @@ export const FileCard: React.FC<Props> = ({
           {onMove && (
             <button
               id={`grid-move-${file.id}`}
-              disabled={isProtected || isRestrictedAdminOnly}
+              disabled={isProtected}
               onClick={handleMoveClick}
               title={isProtected ? "Protected: Administrator items cannot be moved" : "Move to folder..."}
               className={`p-1.5 rounded-md transition-colors ${
-                isProtected || isRestrictedAdminOnly
+                isProtected
                   ? 'opacity-30 cursor-not-allowed text-slate-400'
                   : 'text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
@@ -556,41 +502,26 @@ export const FileCard: React.FC<Props> = ({
           {onQrCode && (
             <button
               id={`grid-qr-${file.id}`}
-              disabled={isRestrictedAdminOnly}
               onClick={handleQrClick}
-              title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "QR Code"}
-              className={`p-1.5 rounded-md transition-colors ${
-                isRestrictedAdminOnly
-                  ? 'opacity-30 cursor-not-allowed text-slate-400'
-                  : 'text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
+              title="QR Code"
+              className="p-1.5 rounded-md transition-colors text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <QrCode className="w-4 h-4" />
             </button>
           )}
           <button
             id={`grid-preview-${file.id}`}
-            disabled={isRestrictedAdminOnly}
             onClick={handlePreviewClick}
-            title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Preview"}
-            className={`p-1.5 rounded-md transition-colors ${
-              isRestrictedAdminOnly
-                ? 'opacity-30 cursor-not-allowed text-slate-400'
-                : 'text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
+            title="Preview"
+            className="p-1.5 rounded-md transition-colors text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <Eye className="w-4 h-4" />
           </button>
           <button
             id={`grid-share-${file.id}`}
-            disabled={isRestrictedAdminOnly}
             onClick={copyShareLink}
-            title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Share URL"}
-            className={`p-1.5 rounded-md transition-colors ${
-              isRestrictedAdminOnly
-                ? 'opacity-30 cursor-not-allowed text-slate-400'
-                : 'text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
+            title="Share URL"
+            className="p-1.5 rounded-md transition-colors text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
           </button>

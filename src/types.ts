@@ -11,7 +11,6 @@ export interface FileRecord {
   downloadCount: number;
   uploadedBy?: string;
   uploadedByRole?: 'administrator' | 'normal';
-  isAdminOnly?: boolean;
   isFolder?: boolean;
   folderPath?: string;
   relativePath?: string;

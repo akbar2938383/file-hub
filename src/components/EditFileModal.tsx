@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileRecord, User } from '../types';
 import { canPerformFileAction } from '../utils/fileGuards';
-import { Edit3, X, Tag, FileText, Check, Loader2, ShieldAlert, Lock } from 'lucide-react';
+import { Edit3, X, Tag, FileText, Check, Loader2, ShieldAlert } from 'lucide-react';
 
 interface Props {
   file: FileRecord | null;
@@ -16,18 +16,14 @@ export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, 
   const [originalName, setOriginalName] = useState('');
   const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
-  const [isAdminOnly, setIsAdminOnly] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isUserAdmin = currentUser?.role === 'administrator';
 
   useEffect(() => {
     if (file) {
       setOriginalName(file.originalName);
       setDescription(file.description || '');
       setTagsInput(file.tags ? file.tags.join(', ') : '');
-      setIsAdminOnly(file.isAdminOnly || false);
     }
   }, [file]);
 
@@ -59,7 +55,6 @@ export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, 
           originalName: originalName.trim(),
           description: description.trim(),
           tags: tagsArr,
-          ...(isUserAdmin ? { isAdminOnly } : {}),
         }),
       });
 
@@ -147,41 +142,6 @@ export const EditFileModal: React.FC<Props> = ({ file, isOpen, onClose, onSave, 
               className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
-
-          {/* Admin Only Toggle (visible for administrators) */}
-          {isUserAdmin && (
-            <div className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5">
-                <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <span>Admin Only Access</span>
-                    <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-semibold rounded">
-                      Restricted
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {file.isFolder
-                      ? 'When active, this folder and all contained files are hidden from non-admin users'
-                      : 'When active, only administrators can view or download this file'}
-                  </p>
-                </div>
-              </div>
-
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  id="admin-only-edit-toggle"
-                  checked={isAdminOnly}
-                  onChange={(e) => setIsAdminOnly(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-amber-500"></div>
-              </label>
-            </div>
-          )}
 
           {/* Footer */}
           <div className="pt-3 flex justify-end gap-3">

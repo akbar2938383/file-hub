@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { FileRecord, User } from '../types';
-import { isFileAdminOnly, isFileAdminProtected } from '../utils/fileGuards';
-import { Folder, FolderPlus, FolderOpen, Home, ChevronRight, Search, X, Check, Lock, AlertCircle, Loader2 } from 'lucide-react';
+import { Folder, FolderPlus, FolderOpen, Home, ChevronRight, Search, X, Check, AlertCircle, Loader2 } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -30,10 +29,7 @@ export const MoveToFolderModal: React.FC<Props> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [isNewFolderAdminOnly, setIsNewFolderAdminOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const isUserAdmin = currentUser?.role === 'administrator';
 
   // Normalize path helper
   const normalize = (p: string | undefined | null) =>
@@ -111,7 +107,6 @@ export const MoveToFolderModal: React.FC<Props> = ({
           name: newFolderName.trim(),
           parentFolderPath: selectedTarget,
           uploadedByRole: currentUser?.role || 'normal',
-          isAdminOnly: isUserAdmin ? isNewFolderAdminOnly : undefined,
         }),
       });
 
@@ -122,7 +117,6 @@ export const MoveToFolderModal: React.FC<Props> = ({
       const createdFolderParent = selectedTarget ? `${selectedTarget}/${newFolderName.trim()}` : newFolderName.trim();
       setSelectedTarget(createdFolderParent);
       setNewFolderName('');
-      setIsNewFolderAdminOnly(false);
       setIsCreatingFolder(false);
       onRefreshFiles?.();
     } catch (err: any) {
@@ -226,17 +220,6 @@ export const MoveToFolderModal: React.FC<Props> = ({
                 Create
               </button>
             </div>
-            {isUserAdmin && (
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer pt-1">
-                <input
-                  type="checkbox"
-                  checked={isNewFolderAdminOnly}
-                  onChange={(e) => setIsNewFolderAdminOnly(e.target.checked)}
-                  className="rounded text-blue-600 w-3.5 h-3.5"
-                />
-                <span>Restrict folder to Admin Only</span>
-              </label>
-            )}
           </form>
         )}
 
@@ -267,9 +250,7 @@ export const MoveToFolderModal: React.FC<Props> = ({
           {filteredFolders.map(({ record, fullPath, level }) => {
             const isSelected = normalize(selectedTarget).toLowerCase() === fullPath.toLowerCase();
             const isInvalidTarget = invalidDestinationPaths.has(fullPath.toLowerCase());
-            const isAdminOnly = isFileAdminOnly(record, allFiles);
-            const isRestrictedForUser = isAdminOnly && !isUserAdmin;
-            const isDisabled = isInvalidTarget || isRestrictedForUser;
+            const isDisabled = isInvalidTarget;
 
             return (
               <div
@@ -293,13 +274,6 @@ export const MoveToFolderModal: React.FC<Props> = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium text-xs truncate">{record.originalName}</span>
-                      {isAdminOnly && (
-                        <span className={`text-[9px] px-1 py-0.2 rounded font-semibold flex items-center gap-0.5 ${
-                          isSelected ? 'bg-white/20 text-white' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                        }`}>
-                          <Lock className="w-2.5 h-2.5" /> Admin
-                        </span>
-                      )}
                     </div>
                     <span className={`text-[10px] block truncate ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
                       /{fullPath}

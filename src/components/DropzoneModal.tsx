@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, X, File, Folder, CheckCircle2, AlertCircle, Loader2, FolderPlus, Zap, StopCircle, Image as ImageIcon, Lock } from 'lucide-react';
+import { Upload, X, File, Folder, CheckCircle2, AlertCircle, Loader2, FolderPlus, Zap, StopCircle, Image as ImageIcon } from 'lucide-react';
 import { formatBytes } from '../utils/formatters';
 import { User } from '../types';
 import { idbSaveRecord, idbSaveRecords, idbSaveBlob } from '../lib/idb';
@@ -23,7 +23,6 @@ interface QueuedFile {
 
 export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSuccess, currentUser, currentFolderPath = '' }) => {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
-  const [isAdminOnly, setIsAdminOnly] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -329,7 +328,6 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
       folderPath: currentFolderPath || '',
       fileSize: file.size,
       mimeType: file.type || 'application/octet-stream',
-      isAdminOnly: isUserAdmin ? isAdminOnly : undefined,
     };
 
     const res = await fetch('/api/files/upload-complete', {
@@ -410,9 +408,6 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
           const formData = new FormData();
           if (currentFolderPath) {
             formData.append('folderPath', currentFolderPath);
-          }
-          if (isUserAdmin && isAdminOnly) {
-            formData.append('isAdminOnly', 'true');
           }
           const relPath = item.relativePath || item.file.name;
           formData.append('relativePaths', JSON.stringify([relPath]));
@@ -672,40 +667,6 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
               </button>
             </div>
           </div>
-
-          {/* Admin Only Toggle (visible for administrators) */}
-          {isUserAdmin && (
-            <div className="p-3.5 rounded-2xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5">
-                <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <span>Upload as Admin Only</span>
-                    <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-semibold rounded">
-                      Restricted
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Uploaded files and folders will only be visible to administrators.
-                  </p>
-                </div>
-              </div>
-
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  id="admin-only-dropzone-toggle"
-                  checked={isAdminOnly}
-                  onChange={(e) => setIsAdminOnly(e.target.checked)}
-                  disabled={isUploading}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-amber-500"></div>
-              </label>
-            </div>
-          )}
 
           {/* Queued Files List */}
           {queuedFiles.length > 0 && (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FileRecord, StorageStats, ViewMode, SortOption, CategoryFilter, User, ActivePage, WallpaperSettings, DownloadTask } from './types';
 import { idbSaveRecords, idbGetAllRecords, idbGetBlob, idbDeleteRecord, idbDeleteRecords } from './lib/idb';
-import { canPerformFileAction, isFileAdminOnly, isFileAdminProtected } from './utils/fileGuards';
+import { canPerformFileAction, isFileAdminProtected } from './utils/fileGuards';
 import { formatSpeed } from './utils/formatters';
 import { Navbar } from './components/Navbar';
 import { StorageSummaryCard } from './components/StorageSummaryCard';
@@ -255,7 +255,6 @@ export default function App() {
         formData.append('description', record.description || '');
         formData.append('tags', JSON.stringify(record.tags || []));
         formData.append('uploadDate', record.uploadDate);
-        formData.append('isAdminOnly', String(record.isAdminOnly || false));
 
         const headers: Record<string, string> = {};
         if (currentUser?.username) headers['x-username'] = currentUser.username;
@@ -332,10 +331,9 @@ export default function App() {
         }
       }
 
-      const filterAvatarsAndAdminOnly = (records: FileRecord[]) => {
+      const filterAvatars = (records: FileRecord[]) => {
         if (currentUser?.role === 'administrator') return records;
         return records.filter((r: FileRecord) => {
-          if (isFileAdminOnly(r, records)) return false;
           const isAvatarFile =
             r.tags?.includes('avatar') ||
             r.tags?.includes('user-pfp') ||
@@ -348,7 +346,7 @@ export default function App() {
         });
       };
 
-      serverRecords = filterAvatarsAndAdminOnly(serverRecords);
+      serverRecords = filterAvatars(serverRecords);
 
       // If server returned records, update files and sync to IndexedDB
       if (serverRecords.length > 0) {
@@ -386,7 +384,7 @@ export default function App() {
       } else {
         // If server returned 0 records, check if we have local cached records to recover from
         const localRecords = await idbGetAllRecords();
-        const filteredLocal = filterAvatarsAndAdminOnly(localRecords);
+        const filteredLocal = filterAvatars(localRecords);
 
         if (filteredLocal.length > 0 && activeCategory === 'all' && !debouncedSearchTerm) {
           // Keep showing local files and rehydrate server
@@ -406,7 +404,6 @@ export default function App() {
       const filteredLocal = currentUser?.role === 'administrator'
         ? localRecords
         : localRecords.filter((r) => {
-            if (isFileAdminOnly(r, localRecords)) return false;
             const isAvatarFile =
               r.tags?.includes('avatar') ||
               r.tags?.includes('user-pfp') ||

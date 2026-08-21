@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileRecord, User } from '../types';
 import { formatBytes, formatDate } from '../utils/formatters';
-import { canPerformFileAction, isFileAdminProtected, isFileAdminOnly } from '../utils/fileGuards';
+import { canPerformFileAction, isFileAdminProtected } from '../utils/fileGuards';
 import { Download, X, Copy, Check, Eye, FileText, Code, Film, Music, Image, Archive, Tag, Calendar, HardDrive, Share2, Trash2, QrCode, Lock } from 'lucide-react';
 import { idbGetBlob } from '../lib/idb';
 
@@ -37,7 +37,6 @@ export const FilePreviewModal: React.FC<Props> = ({
 
   const isUserAdmin = currentUser?.role === 'administrator';
   const isProtected = file ? (isFileAdminProtected(file, allFiles) && !isUserAdmin) : false;
-  const isRestrictedAdminOnly = file ? (isFileAdminOnly(file, allFiles) && !isUserAdmin) : false;
 
   const notifyBlocked = (msg: string) => {
     showToast?.(msg, 'error');
@@ -278,14 +277,9 @@ export const FilePreviewModal: React.FC<Props> = ({
             {onQrCode && (
               <button
                 id="qr-preview-file"
-                disabled={isRestrictedAdminOnly}
                 onClick={handleQr}
-                title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Mobile QR Code"}
-                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 ${
-                  isRestrictedAdminOnly
-                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
+                title="Mobile QR Code"
+                className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <QrCode className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span className="hidden md:inline">QR Code</span>
@@ -294,14 +288,9 @@ export const FilePreviewModal: React.FC<Props> = ({
 
             <button
               id="copy-download-link"
-              disabled={isRestrictedAdminOnly}
               onClick={handleCopyLink}
-              title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Copy download URL"}
-              className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 ${
-                isRestrictedAdminOnly
-                  ? 'opacity-30 cursor-not-allowed text-slate-400'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
+              title="Copy download URL"
+              className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               {copiedLink ? <Check className="w-4 h-4 text-emerald-500 shrink-0" /> : <Share2 className="w-4 h-4 shrink-0" />}
               <span className="hidden sm:inline">{copiedLink ? 'Copied' : 'Share'}</span>
@@ -309,14 +298,9 @@ export const FilePreviewModal: React.FC<Props> = ({
 
             <button
               id="download-preview-file"
-              disabled={isRestrictedAdminOnly}
               onClick={handleDownload}
-              title={isRestrictedAdminOnly ? "Restricted: Administrator Only" : "Download file"}
-              className={`p-1.5 sm:p-2 sm:px-3 rounded-lg sm:rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors ${
-                isRestrictedAdminOnly
-                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
+              title="Download file"
+              className="p-1.5 sm:p-2 sm:px-3 rounded-lg sm:rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors bg-blue-600 hover:bg-blue-700 text-white"
             >
               <Download className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Download</span>

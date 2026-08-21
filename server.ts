@@ -33,7 +33,6 @@ interface FileRecord {
   downloadCount: number;
   uploadedBy?: string;
   uploadedByRole?: 'administrator' | 'normal';
-  isAdminOnly?: boolean;
   isFolder?: boolean;
   folderPath?: string;
   relativePath?: string;
@@ -1449,8 +1448,6 @@ app.post("/api/files/rehydrate", upload.single("file"), async (req, res) => {
     }
   }
 
-  const isAdminOnly = req.body.isAdminOnly === "true" || req.body.isAdminOnly === true;
-
   const record: FileRecord = {
     id,
     originalName,
@@ -1464,7 +1461,6 @@ app.post("/api/files/rehydrate", upload.single("file"), async (req, res) => {
     downloadCount: Number(req.body.downloadCount || 0),
     uploadedBy,
     uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-    isAdminOnly: isAdminOnly || undefined,
     folderPath: fileFolderPath,
     relativePath: relPath,
   };
@@ -1488,35 +1484,12 @@ app.post("/api/files/rehydrate", upload.single("file"), async (req, res) => {
 });
 
 /**
- * Checks if a file or folder is marked Admin Only directly, or located inside an Admin Only parent folder.
- */
-function isRecordAdminOnly(record: FileRecord, allRecords: FileRecord[]): boolean {
-  if (record.isAdminOnly) return true;
-  if (!record.folderPath) return false;
-
-  const parts = record.folderPath.split("/").filter(Boolean);
-  let currentAccum = "";
-  for (let i = 0; i < parts.length; i++) {
-    const parentFolder = allRecords.find(
-      (r) => r.isFolder && (r.folderPath || "") === currentAccum && r.originalName.toLowerCase() === parts[i].toLowerCase()
-    );
-    if (parentFolder && parentFolder.isAdminOnly) {
-      return true;
-    }
-    currentAccum = currentAccum ? `${currentAccum}/${parts[i]}` : parts[i];
-  }
-  return false;
-}
-
-/**
  * Checks if a file or folder is protected from regular members.
  * Protected items include:
- * 1. Admin-Only items (isAdminOnly: true directly or via parent folder)
- * 2. Items uploaded/created by an administrator (uploadedByRole === 'administrator')
- * 3. Items located inside a parent folder uploaded/created by an administrator
+ * 1. Items uploaded/created by an administrator (uploadedByRole === 'administrator')
+ * 2. Items located inside a parent folder uploaded/created by an administrator
  */
 function isRecordAdminProtected(record: FileRecord, allRecords: FileRecord[]): boolean {
-  if (record.isAdminOnly) return true;
   if (record.uploadedByRole === "administrator") return true;
   if (!record.folderPath) return false;
 
@@ -1526,7 +1499,7 @@ function isRecordAdminProtected(record: FileRecord, allRecords: FileRecord[]): b
     const parentFolder = allRecords.find(
       (r) => r.isFolder && (r.folderPath || "") === currentAccum && r.originalName.toLowerCase() === parts[i].toLowerCase()
     );
-    if (parentFolder && (parentFolder.isAdminOnly || parentFolder.uploadedByRole === "administrator")) {
+    if (parentFolder && parentFolder.uploadedByRole === "administrator") {
       return true;
     }
     currentAccum = currentAccum ? `${currentAccum}/${parts[i]}` : parts[i];
@@ -1562,10 +1535,9 @@ app.get("/api/files", (req, res) => {
   const requesterRole = getRequesterRole(req);
   let records = getMetadata();
 
-  // Non-administrators must NEVER see Admin Only files/folders or avatar files
+  // Non-administrators must NEVER see avatar files
   if (requesterRole !== "administrator") {
     records = records.filter((r) => {
-      if (isRecordAdminOnly(r, records)) return false;
       const isAvatarFile =
         r.tags?.includes("avatar") ||
         r.tags?.includes("user-pfp") ||
@@ -1626,7 +1598,6 @@ app.get("/api/files/stats", (req, res) => {
 
   if (requesterRole !== "administrator") {
     records = records.filter((r) => {
-      if (isRecordAdminOnly(r, records)) return false;
       const isAvatarFile =
         r.tags?.includes("avatar") ||
         r.tags?.includes("user-pfp") ||
@@ -1768,7 +1739,6 @@ app.post("/api/folders/create", (req, res) => {
   const cleanName = name.trim().replace(/[\/\\]/g, "_");
   const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
   const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
-  const isAdminOnly = (uploadedByRole === "administrator" || (req.headers["x-user-role"] as string) === "administrator") && (req.body.isAdminOnly === true || req.body.isAdminOnly === "true");
 
   const folderPath = parentPath ? parentPath.trim() : "";
   const existingRecords = getMetadata();
@@ -1794,7 +1764,6 @@ app.post("/api/folders/create", (req, res) => {
     downloadCount: 0,
     uploadedBy,
     uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-    isAdminOnly: isAdminOnly || undefined,
     isFolder: true,
     folderPath,
   };
@@ -1813,7 +1782,6 @@ app.post("/api/files/upload", upload.array("files", 200), async (req, res) => {
   const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
   const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
   const baseFolderPath = (req.body.folderPath as string) || "";
-  const isAdminOnly = (uploadedByRole === "administrator" || (req.headers["x-user-role"] as string) === "administrator") && (req.body.isAdminOnly === true || req.body.isAdminOnly === "true");
 
   let relativePaths: string[] = [];
   if (req.body.relativePaths) {
@@ -1860,7 +1828,6 @@ app.post("/api/files/upload", upload.array("files", 200), async (req, res) => {
       downloadCount: 0,
       uploadedBy,
       uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-      isAdminOnly: isAdminOnly || undefined,
       folderPath: fileFolderPath,
       relativePath: relPath,
     };
@@ -1950,7 +1917,6 @@ app.post("/api/files/upload-complete", async (req, res) => {
 
     const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
     const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
-    const isAdminOnly = (uploadedByRole === "administrator" || (req.headers["x-user-role"] as string) === "administrator") && (req.body.isAdminOnly === true || req.body.isAdminOnly === "true");
 
     const cleanOriginalName = path.basename(originalName.replace(/\\/g, "/"));
     const ext = path.extname(cleanOriginalName);
@@ -2005,7 +1971,6 @@ app.post("/api/files/upload-complete", async (req, res) => {
       downloadCount: 0,
       uploadedBy,
       uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-      isAdminOnly: isAdminOnly || undefined,
       folderPath: fileFolderPath,
       relativePath: relPath,
     };
@@ -2040,7 +2005,6 @@ app.post("/api/files/create-text", async (req, res) => {
 
   const uploadedBy = (req.headers["x-username"] as string) || (req.body.uploadedBy as string) || "public";
   const uploadedByRole = (req.headers["x-user-role"] as string) || (req.body.uploadedByRole as string) || "normal";
-  const isAdminOnly = (uploadedByRole === "administrator" || (req.headers["x-user-role"] as string) === "administrator") && (req.body.isAdminOnly === true || req.body.isAdminOnly === "true");
 
   const cleanTitle = title.endsWith(`.${extension}`) ? title : `${title}.${extension}`;
   const filename = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${extension}`;
@@ -2063,7 +2027,6 @@ app.post("/api/files/create-text", async (req, res) => {
     downloadCount: 0,
     uploadedBy,
     uploadedByRole: (uploadedByRole === "administrator" ? "administrator" : "normal") as "administrator" | "normal",
-    isAdminOnly: isAdminOnly || undefined,
     folderPath,
   };
 
@@ -2101,11 +2064,6 @@ app.post("/api/files/bulk-download-zip", async (req, res) => {
     );
   } else {
     return res.status(400).json({ error: "No files or folder specified" });
-  }
-
-  // Filter out Admin Only items for non-administrators
-  if (requesterRole !== "administrator") {
-    filesToZip = filesToZip.filter((file) => !isRecordAdminOnly(file, records));
   }
 
   // Deduplicate
@@ -2147,7 +2105,6 @@ app.post("/api/files/bulk-download-zip", async (req, res) => {
 // 5. Download File or Folder by ID
 app.get("/api/files/:id/download", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const recordIndex = records.findIndex((r) => r.id === id);
 
@@ -2157,21 +2114,12 @@ app.get("/api/files/:id/download", async (req, res) => {
 
   const record = records[recordIndex];
 
-  // Access check for admin-only files/folders
-  if (requesterRole !== "administrator" && isRecordAdminOnly(record, records)) {
-    return res.status(403).json({ error: "Access denied. Restricted to administrators only." });
-  }
-
   // If this item is a folder, create a ZIP archive of all contained files
   if (record.isFolder || record.category === "folder" || !record.filename) {
     const folderFullPath = record.folderPath ? `${record.folderPath}/${record.originalName}` : record.originalName;
-    let subFiles = records.filter(
+    const subFiles = records.filter(
       (r) => !r.isFolder && ((r.folderPath || "") === folderFullPath || (r.folderPath || "").startsWith(folderFullPath + "/"))
     );
-
-    if (requesterRole !== "administrator") {
-      subFiles = subFiles.filter((r) => !isRecordAdminOnly(r, records));
-    }
 
     try {
       const zip = new JSZip();
@@ -2234,17 +2182,11 @@ app.get("/api/files/:id/download", async (req, res) => {
 // 6. Preview / View File Content Inline
 app.get("/api/files/:id/view", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
 
   if (!record) {
     return res.status(404).send("File not found");
-  }
-
-  // Access check for admin-only files
-  if (requesterRole !== "administrator" && isRecordAdminOnly(record, records)) {
-    return res.status(403).send("Access denied. Restricted to administrators only.");
   }
 
   if (record.isFolder || record.category === "folder" || !record.filename) {
@@ -2266,17 +2208,11 @@ app.get("/api/files/:id/view", async (req, res) => {
 // 7. Get File Content as JSON (for text/code previewing directly)
 app.get("/api/files/:id/content", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
 
   if (!record) {
     return res.status(404).json({ error: "File not found" });
-  }
-
-  // Access check for admin-only files
-  if (requesterRole !== "administrator" && isRecordAdminOnly(record, records)) {
-    return res.status(403).json({ error: "Access denied. Restricted to administrators only." });
   }
 
   if (record.isFolder || record.category === "folder" || !record.filename) {
@@ -2302,10 +2238,10 @@ app.get("/api/files/:id/content", async (req, res) => {
   }
 });
 
-// 8. Update File Metadata (rename, description, tags, isAdminOnly)
+// 8. Update File Metadata (rename, description, tags)
 app.put("/api/files/:id", (req, res) => {
   const { id } = req.params;
-  const { originalName, description, tags, isAdminOnly } = req.body;
+  const { originalName, description, tags } = req.body;
   const requesterRole = getRequesterRole(req);
 
   const records = getMetadata();
@@ -2315,7 +2251,7 @@ app.put("/api/files/:id", (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  // Permission check: Non-administrators cannot modify admin-uploaded or admin-only files/folders
+  // Permission check: Non-administrators cannot modify admin-uploaded files/folders
   if (requesterRole !== "administrator" && isRecordAdminProtected(records[index], records)) {
     return res.status(403).json({ error: "Access denied. Cannot modify files or folders created by administrator." });
   }
@@ -2330,39 +2266,9 @@ app.put("/api/files/:id", (req, res) => {
   if (Array.isArray(tags)) {
     records[index].tags = tags.map((t) => t.trim()).filter(Boolean);
   }
-  if (requesterRole === "administrator" && typeof isAdminOnly === "boolean") {
-    records[index].isAdminOnly = isAdminOnly;
-  }
 
   saveMetadata(records);
   res.json({ message: "File metadata updated", file: records[index] });
-});
-
-// Toggle Admin Only Access Endpoint
-app.post("/api/files/:id/toggle-admin-only", (req, res) => {
-  const { id } = req.params;
-  const requesterRole = getRequesterRole(req);
-
-  if (requesterRole !== "administrator") {
-    return res.status(403).json({ error: "Only administrators can toggle admin-only status" });
-  }
-
-  const records = getMetadata();
-  const index = records.findIndex((r) => r.id === id);
-
-  if (index === -1) {
-    return res.status(404).json({ error: "File or folder not found" });
-  }
-
-  const newStatus = !records[index].isAdminOnly;
-  records[index].isAdminOnly = newStatus;
-  saveMetadata(records);
-
-  res.json({
-    message: `Access status updated: ${newStatus ? "Restricted to Admin Only" : "Accessible to All Users"}`,
-    file: records[index],
-    isAdminOnly: newStatus,
-  });
 });
 
 /**
@@ -2593,21 +2499,6 @@ app.post("/api/files/bulk-move", (req, res) => {
 
     if (!destFolderExists) {
       return res.status(404).json({ error: `Destination folder "${cleanDest}" does not exist` });
-    }
-
-    // Verify requester permission if destination folder is admin-only
-    if (requesterRole !== "administrator") {
-      const destFolderRecord = records.find((r) => {
-        if (!r.isFolder && r.category !== "folder") return false;
-        const fullPath = (r.folderPath ? `${r.folderPath}/${r.originalName}` : r.originalName)
-          .replace(/\\/g, "/")
-          .replace(/^\/+|\/+$/g, "");
-        return fullPath.toLowerCase() === cleanDest.toLowerCase();
-      });
-
-      if (destFolderRecord && isRecordAdminOnly(destFolderRecord, records)) {
-        return res.status(403).json({ error: "Access denied. Cannot move files into an Admin-Only folder." });
-      }
     }
   }
 

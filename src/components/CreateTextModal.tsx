@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileCode, X, Plus, AlertCircle, Loader2, Lock } from 'lucide-react';
+import { FileCode, X, Plus, AlertCircle, Loader2 } from 'lucide-react';
 import { User } from '../types';
 import { idbSaveRecord, idbSaveBlob } from '../lib/idb';
 
@@ -16,11 +16,8 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
   const [extension, setExtension] = useState('txt');
   const [content, setContent] = useState('');
   const [description, setDescription] = useState('');
-  const [isAdminOnly, setIsAdminOnly] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isUserAdmin = currentUser?.role === 'administrator';
 
   if (!isOpen) return null;
 
@@ -50,7 +47,6 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
           content,
           description: description.trim(),
           folderPath: currentFolderPath || '',
-          isAdminOnly: isUserAdmin ? isAdminOnly : undefined,
         }),
       });
 
@@ -70,7 +66,6 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
       setTitle('');
       setContent('');
       setDescription('');
-      setIsAdminOnly(false);
       onCreated();
       onClose();
     } catch (err: unknown) {
@@ -166,39 +161,6 @@ export const CreateTextModal: React.FC<Props> = ({ isOpen, onClose, onCreated, c
               className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-900 text-slate-100 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
-
-          {/* Admin Only Toggle (visible for administrators) */}
-          {isUserAdmin && (
-            <div className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5">
-                <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg shrink-0 mt-0.5">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <span>Admin Only File</span>
-                    <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-semibold rounded">
-                      Admin Restricted
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Restricts viewing and downloading of this file to administrators only.
-                  </p>
-                </div>
-              </div>
-
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  id="admin-only-create-text-toggle"
-                  checked={isAdminOnly}
-                  onChange={(e) => setIsAdminOnly(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-amber-500"></div>
-              </label>
-            </div>
-          )}
 
           {/* Footer */}
           <div className="pt-3 flex justify-end gap-3">
