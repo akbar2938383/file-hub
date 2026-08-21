@@ -158,24 +158,9 @@ export const WallpaperChangerPage: React.FC<Props> = ({
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold border border-blue-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Real-time Dynamic Wallpaper Engine</span>
-            </div>
             <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
               Wallpapers & Background Manager
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300">
-              {isAdmin ? (
-                <span>
-                  As <strong className="text-amber-400">Administrator</strong>, any background you choose or upload here is broadcasted <strong className="text-emerald-400">live across all connected sessions and public guests</strong>.
-                </span>
-              ) : (
-                <span>
-                  Viewing active global wallpaper set by Administrator. Public users see this background dynamically updated in real-time.
-                </span>
-              )}
-            </p>
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
@@ -198,9 +183,6 @@ export const WallpaperChangerPage: React.FC<Props> = ({
               </div>
               <div>
                 <h3 className="font-bold text-lg text-white">Live Animated Wallpaper Mode</h3>
-                <p className="text-xs text-slate-300">
-                  Toggle live dynamic canvas animations or streaming videos across all background screens.
-                </p>
               </div>
             </div>
 

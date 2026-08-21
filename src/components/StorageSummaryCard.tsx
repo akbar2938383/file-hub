@@ -52,7 +52,7 @@ export const StorageSummaryCard: React.FC<Props> = ({ stats, currentUser, onClea
               )}
             </div>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-0.5">
-              {stats.totalFiles} file{stats.totalFiles === 1 ? '' : 's'} stored &bull; <strong className="text-blue-600 dark:text-blue-400">{formatBytes(stats.totalSize)}</strong> / {formatBytes(serverCapacity)}
+              {stats.totalFiles} file{stats.totalFiles === 1 ? '' : 's'} stored
             </p>
           </div>
         </div>

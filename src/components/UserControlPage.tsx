@@ -215,16 +215,9 @@ export const UserControlPage: React.FC<Props> = ({ currentUser, showToast, onCur
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold border border-amber-500/30">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin Privileges Active</span>
-            </div>
             <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
               User Control & Access Panel
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl">
-              Manage system accounts, assign administrator roles, reset credentials, and audit access permissions across the system.
-            </p>
           </div>
 
           {isAdmin && (

@@ -125,15 +125,25 @@ function getDb() {
 }
 
 function handleFirestoreQuotaError(err: any, contextName: string) {
-  if (err?.code === "resource-exhausted" || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("Quota limit exceeded")) {
+  const errMsg = err?.message || String(err || "");
+  const errCode = err?.code || "";
+  if (
+    errCode === "resource-exhausted" ||
+    errCode === 8 ||
+    errMsg.includes("RESOURCE_EXHAUSTED") ||
+    errMsg.includes("Quota limit exceeded") ||
+    errMsg.includes("free tier database")
+  ) {
     if (!isFirestoreQuotaExceeded) {
       isFirestoreQuotaExceeded = true;
-      console.warn(`Firestore free daily write quota limit reached (${contextName}). Disabling Firestore background writes for this session. App will continue using local disk & metadata.`);
+      console.warn(`[Firestore Quota] Free daily write quota reached (${contextName}). Seamlessly falling back to persistent local disk storage.`);
       if (firestoreDb) {
         const dbToClose = firestoreDb;
         firestoreDb = null;
-        disableNetwork(dbToClose).catch(() => {});
-        terminate(dbToClose).catch(() => {});
+        try {
+          disableNetwork(dbToClose).catch(() => {});
+          terminate(dbToClose).catch(() => {});
+        } catch {}
       }
     }
     return true;
@@ -262,11 +272,7 @@ async function saveFileChunksToFirestore(fileId: string, filePath: string): Prom
           data: base64Data,
           createdAt: new Date().toISOString()
         }, { merge: true }).catch((writeErr: any) => {
-          if (handleFirestoreQuotaError(writeErr, "binary chunk write")) {
-            throw writeErr;
-          } else {
-            console.warn(`Firestore binary chunk write error (${chunkDocId}):`, writeErr?.message || writeErr);
-          }
+          handleFirestoreQuotaError(writeErr, "binary chunk write");
         });
         batchPromises.push(writePromise);
       }

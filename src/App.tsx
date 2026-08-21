@@ -14,6 +14,7 @@ import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { CurlGeneratorModal } from './components/CurlGeneratorModal';
 import { QRCodeModal } from './components/QRCodeModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
+import { BatchRenameModal } from './components/BatchRenameModal';
 import { LoginPage } from './components/LoginPage';
 import { WallpaperChangerPage } from './components/WallpaperChangerPage';
 import { UserControlPage } from './components/UserControlPage';
@@ -98,6 +99,7 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<{ id?: string; bulk?: boolean; name?: string } | null>(null);
   const [cutItemIds, setCutItemIds] = useState<string[]>([]);
   const [movingItems, setMovingItems] = useState<FileRecord[] | null>(null);
+  const [batchRenameItems, setBatchRenameItems] = useState<FileRecord[] | null>(null);
 
   // Toast Feedback
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -1088,6 +1090,21 @@ export default function App() {
     setMovingItems(allowedItems);
   };
 
+  const handleOpenBatchRenameModal = (items: FileRecord[]) => {
+    if (!items || items.length === 0) return;
+
+    const allowedItems = items.filter((file) =>
+      canPerformFileAction('edit', file, currentUser, files, (msg) => showToast(msg, 'error'))
+    );
+
+    if (allowedItems.length === 0) {
+      showToast('Protected: Selected item(s) cannot be renamed.', 'error');
+      return;
+    }
+
+    setBatchRenameItems(allowedItems);
+  };
+
   const handleConfirmModalMove = async (targetFolderPath: string) => {
     if (!movingItems || movingItems.length === 0) return;
     const idsToMove = movingItems.map((f) => f.id);
@@ -1318,6 +1335,7 @@ export default function App() {
                 onCancelCut={handleCancelCut}
                 onPaste={handlePaste}
                 onOpenMoveModal={handleOpenMoveModal}
+                onOpenBatchRename={handleOpenBatchRenameModal}
                 onDownload={handleDownloadFile}
                 onPreview={(f) => setPreviewingFile(f)}
                 onEdit={(f) => setEditingFile(f)}
@@ -1373,6 +1391,20 @@ export default function App() {
         currentFolderPath={currentFolderPath}
         onClose={() => setMovingItems(null)}
         onConfirmMove={handleConfirmModalMove}
+      />
+
+      <BatchRenameModal
+        isOpen={!!batchRenameItems}
+        onClose={() => setBatchRenameItems(null)}
+        selectedFiles={batchRenameItems || []}
+        allFiles={files}
+        currentUser={currentUser}
+        onRenameSuccess={() => {
+          fetchFiles();
+          fetchStats();
+          setSelectedIds([]);
+        }}
+        showToast={showToast}
       />
 
       <CreateTextModal

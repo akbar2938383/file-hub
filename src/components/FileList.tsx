@@ -213,13 +213,13 @@ export const FileList: React.FC<Props> = ({
                 {displayedFiles.length} item{displayedFiles.length === 1 ? '' : 's'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {currentFolderPath 
-                ? `Directory: /${currentFolderPath}` 
-                : (activeCategory !== 'all' 
-                    ? `Category: ${categories.find((c) => c.key === activeCategory)?.label || activeCategory}` 
-                    : 'Manage, organize, and access all stored files')}
-            </p>
+            {(currentFolderPath || activeCategory !== 'all') && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {currentFolderPath 
+                  ? `Directory: /${currentFolderPath}` 
+                  : `Category: ${categories.find((c) => c.key === activeCategory)?.label || activeCategory}`}
+              </p>
+            )}
           </div>
         </div>
 
@@ -542,6 +542,19 @@ export const FileList: React.FC<Props> = ({
                 </button>
               )}
 
+              {/* Batch Rename Button */}
+              {onOpenBatchRename && (
+                <button
+                  id="bulk-rename-btn"
+                  onClick={handleBulkBatchRename}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-medium shadow-sm transition-colors"
+                  title="Batch rename selected files with prefix/suffix or sequence pattern"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Batch Rename</span>
+                </button>
+              )}
+
               <button
                 id="bulk-download-btn"
                 onClick={onBulkDownload}
@@ -575,11 +588,12 @@ export const FileList: React.FC<Props> = ({
             <h3 className="font-semibold text-lg text-slate-900 dark:text-slate-100 mb-1">
               {currentFolderPath ? `Folder "${currentFolderPath}" is empty` : 'No files or folders found'}
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mb-6">
-              {searchTerm
-                ? `No files match "${searchTerm}"`
-                : 'This directory is currently empty. Upload files or create new subfolders to organize your vault.'}
-            </p>
+            {searchTerm && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mb-6">
+                No files match "{searchTerm}"
+              </p>
+            )}
+            {!searchTerm && <div className="mb-6" />}
             <div className="flex items-center gap-3">
               {cutItemIds.length > 0 && onPaste && (
                 <button

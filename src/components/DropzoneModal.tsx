@@ -588,12 +588,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">Optimized Vault Upload</h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center gap-1">
-                  <Zap className="w-3 h-3" /> High-Speed
-                </span>
-              </div>
+              <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">Upload Files</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">Drag & drop files, folders, or bulk media assets</p>
             </div>
           </div>
@@ -650,7 +645,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
               Drag & drop files or full folders here
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">
-              Parallel multi-thread streaming • Max 500 MB per file
+              Max 500 MB per file
             </p>
 
             <div className="flex items-center justify-center gap-3">
