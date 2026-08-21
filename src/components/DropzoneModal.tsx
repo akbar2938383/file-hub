@@ -268,7 +268,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
 
             xhr.upload.addEventListener('progress', (e) => {
               if (e.lengthComputable) {
-                onChunkProgress(e.loaded);
+                onChunkProgress(Math.min(e.loaded, currentChunkSize));
               }
             });
 
@@ -424,7 +424,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
 
             xhr.upload.addEventListener('progress', (e) => {
               if (e.lengthComputable) {
-                updateStats(e.loaded);
+                updateStats(Math.min(e.loaded, item.file.size));
               }
             });
 

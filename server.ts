@@ -1823,20 +1823,27 @@ app.post("/api/files/upload", upload.array("files", 200), async (req, res) => {
       relativePath: relPath,
     };
     newRecords.push(record);
-    uploadSavePromises.push(saveFileChunksToFirestore(record.id, path.join(UPLOADS_DIR, file.filename)));
   }
 
   const updatedRecords = [...newRecords, ...newlyCreatedFolders, ...existingRecords];
   saveMetadata(updatedRecords);
 
-  // Await cloud chunk persistence so files are immediately ready across devices
-  await Promise.all(uploadSavePromises);
-
+  // Send response immediately so client uploads complete instantly without blocking
   res.status(201).json({
     message: `${newRecords.length} file(s) uploaded successfully`,
     uploadedFiles: newRecords,
     createdFolders: newlyCreatedFolders,
   });
+
+  // Background cloud chunk persistence (non-blocking)
+  if (!isFirestoreQuotaExceeded) {
+    Promise.resolve().then(async () => {
+      for (const r of newRecords) {
+        if (isFirestoreQuotaExceeded) break;
+        await saveFileChunksToFirestore(r.id, path.join(UPLOADS_DIR, r.filename)).catch(() => {});
+      }
+    }).catch(() => {});
+  }
 });
 
 // 3b. Upload File Chunk (Resumable Chunked Upload)
@@ -1963,13 +1970,19 @@ app.post("/api/files/upload-complete", async (req, res) => {
 
     const updatedRecords = [record, ...createdFolders, ...existingRecords];
     saveMetadata(updatedRecords);
-    await saveFileChunksToFirestore(record.id, finalFilePath);
 
     res.status(201).json({
       message: "File upload completed successfully",
       uploadedFile: record,
       createdFolders,
     });
+
+    // Background cloud chunk persistence (non-blocking)
+    if (!isFirestoreQuotaExceeded) {
+      Promise.resolve().then(async () => {
+        await saveFileChunksToFirestore(record.id, finalFilePath).catch(() => {});
+      }).catch(() => {});
+    }
   } catch (err: any) {
     console.error("Error in upload-complete endpoint:", err);
     res.status(500).json({ error: err.message || "Failed to finalize chunked upload" });
