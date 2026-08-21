@@ -237,12 +237,51 @@ export default function App() {
     }
   }, [currentUser]);
 
+  const rehydrateSingleFile = useCallback(async (record: FileRecord) => {
+    try {
+      const blob = await idbGetBlob(record.id);
+      if (blob) {
+        const formData = new FormData();
+        formData.append('file', blob, record.originalName);
+        formData.append('id', record.id);
+        formData.append('originalName', record.originalName);
+        formData.append('filename', record.filename || '');
+        formData.append('folderPath', record.folderPath || '');
+        formData.append('relativePath', record.relativePath || record.originalName);
+        formData.append('category', record.category);
+        formData.append('mimeType', record.mimeType);
+        formData.append('uploadedBy', record.uploadedBy || currentUser?.username || 'public');
+        formData.append('uploadedByRole', record.uploadedByRole || currentUser?.role || 'normal');
+        formData.append('description', record.description || '');
+        formData.append('tags', JSON.stringify(record.tags || []));
+        formData.append('uploadDate', record.uploadDate);
+        formData.append('isAdminOnly', String(record.isAdminOnly || false));
+
+        const headers: Record<string, string> = {};
+        if (currentUser?.username) headers['x-username'] = currentUser.username;
+        if (currentUser?.role) headers['x-user-role'] = currentUser.role;
+
+        await fetch('/api/files/rehydrate', {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+      }
+    } catch (err) {
+      console.error('Error rehydrating single file to server:', err);
+    }
+  }, [currentUser]);
+
   const rehydrateServerWithLocalRecords = useCallback(async (records: FileRecord[]) => {
     if (!records || records.length === 0) return;
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (currentUser?.username) headers['x-username'] = currentUser.username;
+      if (currentUser?.role) headers['x-user-role'] = currentUser.role;
+
       await fetch('/api/files/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ files: records }),
       });
     } catch (e) {
@@ -251,34 +290,9 @@ export default function App() {
 
     for (const record of records) {
       if (record.isFolder) continue;
-      try {
-        const blob = await idbGetBlob(record.id);
-        if (blob) {
-          const formData = new FormData();
-          formData.append('file', blob, record.originalName);
-          formData.append('id', record.id);
-          formData.append('originalName', record.originalName);
-          formData.append('filename', record.filename || '');
-          formData.append('folderPath', record.folderPath || '');
-          formData.append('relativePath', record.relativePath || record.originalName);
-          formData.append('category', record.category);
-          formData.append('mimeType', record.mimeType);
-          formData.append('uploadedBy', record.uploadedBy || 'public');
-          formData.append('uploadedByRole', record.uploadedByRole || 'normal');
-          formData.append('description', record.description || '');
-          formData.append('tags', JSON.stringify(record.tags || []));
-          formData.append('uploadDate', record.uploadDate);
-
-          await fetch('/api/files/rehydrate', {
-            method: 'POST',
-            body: formData,
-          });
-        }
-      } catch (err) {
-        console.error(`Failed rehydrating file ${record.originalName}:`, err);
-      }
+      await rehydrateSingleFile(record);
     }
-  }, []);
+  }, [currentUser, rehydrateSingleFile]);
 
   const fetchFiles = useCallback(async () => {
     // Abort previous in-flight file fetch request if present
@@ -344,6 +358,20 @@ export default function App() {
           localStorage.setItem('vault_files_backup', JSON.stringify(serverRecords));
         } catch (e) {}
 
+        // Auto-rehydrate any file whose binary is missing on server if available locally
+        try {
+          for (const sRec of serverRecords) {
+            if (sRec.isFolder || !sRec.filename) continue;
+            if (sRec.hasLocalFile === false) {
+              const localBlob = await idbGetBlob(sRec.id);
+              if (localBlob) {
+                console.log(`[Auto-Rehydrate] Restoring physical file for ${sRec.originalName} on server...`);
+                rehydrateSingleFile(sRec);
+              }
+            }
+          }
+        } catch (e) {}
+
         // If full file list was fetched, prune local IndexedDB records that were deleted on the server
         if (activeCategory === 'all' && !debouncedSearchTerm) {
           try {
@@ -397,7 +425,7 @@ export default function App() {
         setIsRefreshing(false);
       }
     }
-  }, [debouncedSearchTerm, activeCategory, sortOption, currentUser, rehydrateServerWithLocalRecords]);
+  }, [debouncedSearchTerm, activeCategory, sortOption, currentUser, rehydrateServerWithLocalRecords, rehydrateSingleFile]);
 
   useEffect(() => {
     fetchFiles();
@@ -413,35 +441,6 @@ export default function App() {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
-  };
-
-  const rehydrateSingleFile = async (record: FileRecord) => {
-    try {
-      const blob = await idbGetBlob(record.id);
-      if (blob) {
-        const formData = new FormData();
-        formData.append('file', blob, record.originalName);
-        formData.append('id', record.id);
-        formData.append('originalName', record.originalName);
-        formData.append('filename', record.filename || '');
-        formData.append('folderPath', record.folderPath || '');
-        formData.append('relativePath', record.relativePath || record.originalName);
-        formData.append('category', record.category);
-        formData.append('mimeType', record.mimeType);
-        formData.append('uploadedBy', record.uploadedBy || 'public');
-        formData.append('uploadedByRole', record.uploadedByRole || 'normal');
-        formData.append('description', record.description || '');
-        formData.append('tags', JSON.stringify(record.tags || []));
-        formData.append('uploadDate', record.uploadDate);
-
-        await fetch('/api/files/rehydrate', {
-          method: 'POST',
-          body: formData,
-        });
-      }
-    } catch (err) {
-      console.error('Error rehydrating single file to server:', err);
-    }
   };
 
   const handleClientFolderZipDownload = async (folderRecord: FileRecord, onProgress?: (percent: number) => void) => {

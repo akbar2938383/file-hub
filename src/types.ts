@@ -16,6 +16,7 @@ export interface FileRecord {
   folderPath?: string;
   relativePath?: string;
   itemCount?: number;
+  hasLocalFile?: boolean;
 }
 
 export interface StorageStats {
