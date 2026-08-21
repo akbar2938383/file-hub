@@ -135,7 +135,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
 
   const addFilesWithPaths = (items: { file: File; relativePath: string }[]) => {
     setErrorMessage(null);
-    const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
+    const MAX_SIZE = 1024 * 1024 * 1024; // 1 GB (1024 MB)
 
     const newItems: QueuedFile[] = items.map(({ file, relativePath }) => {
       let previewUrl: string | undefined = undefined;
@@ -150,7 +150,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
         relativePath,
         previewUrl,
         status: isTooLarge ? 'error' : 'pending',
-        errorMessage: isTooLarge ? 'File exceeds 500 MB limit' : undefined,
+        errorMessage: isTooLarge ? 'File exceeds 1 GB limit' : undefined,
       };
     });
 
@@ -177,7 +177,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
 
   const addFiles = (files: File[]) => {
     setErrorMessage(null);
-    const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
+    const MAX_SIZE = 1024 * 1024 * 1024; // 1 GB (1024 MB)
 
     const newItems: QueuedFile[] = files.map((f) => {
       const relPath = (f as any).webkitRelativePath || f.name;
@@ -195,7 +195,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
         relativePath: relPath,
         previewUrl,
         status: isTooLarge ? 'error' : 'pending',
-        errorMessage: isTooLarge ? 'File exceeds 500 MB limit' : undefined,
+        errorMessage: isTooLarge ? 'File exceeds 1 GB limit' : undefined,
       };
     });
 
@@ -640,7 +640,7 @@ export const DropzoneModal: React.FC<Props> = ({ isOpen, onClose, onUploadSucces
               Drag & drop files or full folders here
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">
-              Max 500 MB per file
+              Max 1 GB per file
             </p>
 
             <div className="flex items-center justify-center gap-3">

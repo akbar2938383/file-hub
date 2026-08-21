@@ -945,7 +945,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 500 * 1024 * 1024, // 500 MB max per file
+    fileSize: 1024 * 1024 * 1024, // 1 GB max per file
     fieldSize: 100 * 1024 * 1024,
     files: 200,
   },
@@ -2750,7 +2750,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   console.error("Global express error:", err);
   if (err instanceof multer.MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ error: "File exceeds the 500 MB upload size limit." });
+      return res.status(400).json({ error: "File exceeds the 1 GB upload size limit." });
     }
     return res.status(400).json({ error: `Upload error: ${err.message}` });
   }
