@@ -1523,10 +1523,28 @@ function isRecordAdminProtected(record: FileRecord, allRecords: FileRecord[]): b
   return false;
 }
 
+function getRequesterRole(req: express.Request): "administrator" | "normal" {
+  const directRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || (req.body?.userRole as string) || "";
+  if (directRole === "administrator") return "administrator";
+
+  const username = (req.headers["x-username"] as string) || (req.query.username as string) || (req.body?.username as string) || "";
+  if (username) {
+    try {
+      const users = getUsers();
+      const matched = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+      if (matched && matched.role === "administrator") {
+        return "administrator";
+      }
+    } catch {}
+  }
+
+  return "normal";
+}
+
 // 1. Get all files with filtering & search
 app.get("/api/files", (req, res) => {
   const { search, category, sort } = req.query;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   let records = getMetadata();
 
   // Non-administrators must NEVER see Admin Only files/folders or avatar files
@@ -1579,7 +1597,7 @@ app.get("/api/files", (req, res) => {
 
 // 2. Storage Stats
 app.get("/api/files/stats", (req, res) => {
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   let records = getMetadata();
 
   if (requesterRole !== "administrator") {
@@ -2035,7 +2053,7 @@ app.post("/api/files/create-text", async (req, res) => {
 // Bulk Download ZIP Archive
 app.post("/api/files/bulk-download-zip", async (req, res) => {
   const { ids, folderPath } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   let filesToZip: FileRecord[] = [];
 
@@ -2105,7 +2123,7 @@ app.post("/api/files/bulk-download-zip", async (req, res) => {
 // 5. Download File or Folder by ID
 app.get("/api/files/:id/download", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const recordIndex = records.findIndex((r) => r.id === id);
 
@@ -2192,7 +2210,7 @@ app.get("/api/files/:id/download", async (req, res) => {
 // 6. Preview / View File Content Inline
 app.get("/api/files/:id/view", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
 
@@ -2224,7 +2242,7 @@ app.get("/api/files/:id/view", async (req, res) => {
 // 7. Get File Content as JSON (for text/code previewing directly)
 app.get("/api/files/:id/content", async (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   const records = getMetadata();
   const record = records.find((r) => r.id === id);
 
@@ -2264,7 +2282,7 @@ app.get("/api/files/:id/content", async (req, res) => {
 app.put("/api/files/:id", (req, res) => {
   const { id } = req.params;
   const { originalName, description, tags, isAdminOnly } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
 
   const records = getMetadata();
   const index = records.findIndex((r) => r.id === id);
@@ -2299,7 +2317,7 @@ app.put("/api/files/:id", (req, res) => {
 // Toggle Admin Only Access Endpoint
 app.post("/api/files/:id/toggle-admin-only", (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
 
   if (requesterRole !== "administrator") {
     return res.status(403).json({ error: "Only administrators can toggle admin-only status" });
@@ -2418,7 +2436,7 @@ function getRecursiveDeletionList(targetIds: string[], allRecords: FileRecord[])
 // 9. Delete File or Folder
 app.delete("/api/files/:id", (req, res) => {
   const { id } = req.params;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.query.userRole as string) || (req.body.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   let records = getMetadata();
   const record = records.find((r) => r.id === id);
 
@@ -2469,7 +2487,7 @@ app.delete("/api/files/:id", (req, res) => {
 // 10. Bulk Delete
 app.post("/api/files/bulk-delete", (req, res) => {
   const { ids } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
 
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: "No item IDs provided" });
@@ -2527,7 +2545,7 @@ app.post("/api/files/bulk-delete", (req, res) => {
 // 10b. Move File(s) or Folder(s) to a Target Directory / Folder
 app.post("/api/files/bulk-move", (req, res) => {
   const { ids, destinationFolderPath = "" } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
 
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: "No item IDs provided to move" });
@@ -2664,7 +2682,7 @@ app.post("/api/files/bulk-move", (req, res) => {
 // 10c. Bulk Rename File(s) and Folder(s)
 app.post("/api/files/bulk-rename", (req, res) => {
   const { items } = req.body;
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || (req.query.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "No rename items provided" });
@@ -2750,7 +2768,7 @@ app.post("/api/files/bulk-rename", (req, res) => {
 
 // 11. Clear All Server Storage (Purge & Reset to 0)
 app.post("/api/files/clear-all", async (req, res) => {
-  const requesterRole = (req.headers["x-user-role"] as string) || (req.body.userRole as string) || "normal";
+  const requesterRole = getRequesterRole(req);
   if (requesterRole !== "administrator") {
     return res.status(403).json({ error: "Only administrators can clear server storage" });
   }

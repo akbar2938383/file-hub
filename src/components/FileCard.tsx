@@ -153,14 +153,16 @@ export const FileCard: React.FC<Props> = ({
 
   const IconComponent = getCategoryIcon(file.category);
   const badgeClass = getCategoryBadgeColor(file.category);
-  const directViewUrl = `/api/files/${file.id}/view`;
-  const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download`;
+  const authQuery = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+  const directViewUrl = `/api/files/${file.id}/view${authQuery}`;
+  const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download${authQuery}`;
 
   const [imgSrc, setImgSrc] = useState<string>(directViewUrl);
 
   useEffect(() => {
-    setImgSrc(`/api/files/${file.id}/view`);
-  }, [file.id]);
+    const query = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+    setImgSrc(`/api/files/${file.id}/view${query}`);
+  }, [file.id, currentUser]);
 
   const handleImageError = async () => {
     try {

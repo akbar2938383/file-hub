@@ -97,7 +97,12 @@ export const FilePreviewModal: React.FC<Props> = ({
     if (file && (file.category === 'code' || file.category === 'document' || file.mimeType.startsWith('text/'))) {
       setIsTextLoading(true);
       setTextError(null);
-      fetch(`/api/files/${file.id}/content`)
+      const authQuery = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+      const headers: Record<string, string> = {};
+      if (currentUser?.role) headers['x-user-role'] = currentUser.role;
+      if (currentUser?.username) headers['x-username'] = currentUser.username;
+
+      fetch(`/api/files/${file.id}/content${authQuery}`, { headers })
         .then((res) => {
           if (!res.ok) throw new Error('Cannot render text preview');
           return res.json();
@@ -135,13 +140,14 @@ export const FilePreviewModal: React.FC<Props> = ({
         URL.revokeObjectURL(createdUrl);
       }
     };
-  }, [file]);
+  }, [file, currentUser]);
 
   if (!isOpen || !file) return null;
 
-  const directViewUrl = `/api/files/${file.id}/view`;
+  const authQuery = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+  const directViewUrl = `/api/files/${file.id}/view${authQuery}`;
   const mediaUrl = localMediaUrl || directViewUrl;
-  const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download`;
+  const directDownloadUrl = `${window.location.origin}/api/files/${file.id}/download${authQuery}`;
 
   const copyDownloadLink = () => {
     navigator.clipboard.writeText(directDownloadUrl);

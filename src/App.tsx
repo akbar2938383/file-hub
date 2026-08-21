@@ -530,8 +530,13 @@ export default function App() {
     // Handle Folder ZIP Download
     if (file.isFolder || file.category === 'folder') {
       try {
-        const downloadUrl = `/api/files/${file.id}/download`;
-        const res = await fetch(downloadUrl, { signal: abortController.signal });
+        const authQuery = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+        const downloadUrl = `/api/files/${file.id}/download${authQuery}`;
+        const downloadHeaders: Record<string, string> = {};
+        if (currentUser?.role) downloadHeaders['x-user-role'] = currentUser.role;
+        if (currentUser?.username) downloadHeaders['x-username'] = currentUser.username;
+
+        const res = await fetch(downloadUrl, { headers: downloadHeaders, signal: abortController.signal });
         if (res.ok) {
           const contentLengthHeader = res.headers.get('content-length');
           const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
@@ -628,9 +633,14 @@ export default function App() {
     }
 
     // Standard File Streaming Download
-    const downloadUrl = `/api/files/${file.id}/download`;
+    const authQuery = currentUser?.role ? `?userRole=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username || '')}` : '';
+    const downloadUrl = `/api/files/${file.id}/download${authQuery}`;
+    const downloadHeaders: Record<string, string> = {};
+    if (currentUser?.role) downloadHeaders['x-user-role'] = currentUser.role;
+    if (currentUser?.username) downloadHeaders['x-username'] = currentUser.username;
+
     try {
-      const res = await fetch(downloadUrl, { signal: abortController.signal });
+      const res = await fetch(downloadUrl, { headers: downloadHeaders, signal: abortController.signal });
       if (res.ok) {
         const contentLengthHeader = res.headers.get('content-length');
         const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : (file.size || 0);
@@ -702,6 +712,12 @@ export default function App() {
         }, 3500);
 
       } else {
+        let serverErrorMsg = '';
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) serverErrorMsg = errData.error;
+        } catch {}
+
         // Fallback to IndexedDB local cache
         const localBlob = await idbGetBlob(file.id);
         if (localBlob) {
@@ -720,7 +736,7 @@ export default function App() {
         } else {
           updateTask({
             status: 'error',
-            errorMessage: 'File not found on server or local cache',
+            errorMessage: serverErrorMsg || (res.status === 403 ? 'Restricted to administrators' : 'File not found on server or local cache'),
           });
         }
       }
@@ -920,10 +936,16 @@ export default function App() {
     try {
       const res = await fetch('/api/files/bulk-download-zip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser?.role ? { 'x-user-role': currentUser.role } : {}),
+          ...(currentUser?.username ? { 'x-username': currentUser.username } : {}),
+        },
         body: JSON.stringify({
           ids: targetIds,
           folderPath: folderPathToZip,
+          userRole: currentUser?.role,
+          username: currentUser?.username,
         }),
       });
 
